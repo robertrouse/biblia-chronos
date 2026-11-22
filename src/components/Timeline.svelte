@@ -93,43 +93,69 @@
   // hairline ties any name that moved to its era. Time starts below the bar.
   const ERA_TOP = 62 // under the site bar
   const ERA_SEG_H = 20 // tall enough to hold its years
-  const ERA_ROW = 16
+  const ERA_LINE = $derived(narrow ? 12.5 : 14) // a line of an era name
+  const ERA_GAP = 3 // bar to the nearest names, and between rows of names
   const eraCharW = $derived(narrow ? 4.3 : 4.8) // width of a letter in its labels (PT Sans Narrow, measured)
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
+  // An era's name as one line, or two if one would overrun its segment and
+  // two (split where the longer line is shortest) fit it better.
+  function eraLines(name: string, room: number): string[] {
+    const words = name.split(" ")
+    if (name.length * eraCharW <= room || words.length < 2) return [name]
+    let best = [name]
+    let longest = name.length
+    for (let i = 1; i < words.length; i++) {
+      const lines = [words.slice(0, i).join(" "), words.slice(i).join(" ")]
+      const l = Math.max(...lines.map((line) => line.length))
+      if (l < longest) [best, longest] = [lines, l]
+    }
+    return best
+  }
   const eraPlaced = $derived.by(() => {
-    const spans = periods.map((p) => ({ p, a: eraX(p.start), b: eraX(p.end) }))
+    const spans = periods.map((p) => {
+      const a = eraX(p.start)
+      const b = eraX(p.end)
+      const lines = eraLines(p.name, b - a - 4)
+      return { p, a, b, lines, w: Math.max(...lines.map((l) => l.length)) * eraCharW }
+    })
     const side = (n: number): "above" | "below" => (n % 2 === 0 ? "above" : "below")
     const place = (s: "above" | "below") => {
       const mine = spans.filter((_, n) => side(n) === s)
       const spots = staggerLabels(
-        mine.map(({ p, a, b }) => ({ at: (a + b) / 2, width: p.name.length * eraCharW })),
+        mine.map(({ a, b, w }) => ({ at: (a + b) / 2, width: w })),
         16,
         width - 16,
       )
       return new Map(mine.map((m, n) => [m.p, spots[n]!]))
     }
     const spots = { above: place("above"), below: place("below") }
-    return spans.map(({ p, a, b }, n) => {
+    return spans.map(({ p, a, b, lines, w }, n) => {
       const { x: cx, row } = spots[side(n)].get(p)!
-      const w = p.name.length * eraCharW
       const mid = (a + b) / 2
       // Where its hairline meets it: the point of the name nearest its era.
       const lx = Math.max(cx - w / 2 + 4, Math.min(cx + w / 2 - 4, mid))
       const moved = row > 0 || cx - w / 2 > b || cx + w / 2 < a
-      return { p, a, b, mid, cx, w, lx, moved, side: side(n), row }
+      return { p, a, b, mid, cx, w, lines, lx, moved, side: side(n), row }
     })
   })
-  const rowsOn = (side: "above" | "below") =>
-    Math.max(0, ...eraPlaced.filter((t) => t.side === side).map((t) => t.row + 1))
-  const ERA_BAR_Y = $derived(ERA_TOP + rowsOn("above") * ERA_ROW + 4)
+  // How far each row of names on a side sits from the bar: rows stack outward,
+  // each as tall as its tallest name.
+  const rowOffsets = (side: "above" | "below") => {
+    const heights: number[] = []
+    for (const t of eraPlaced.filter((t) => t.side === side))
+      heights[t.row] = Math.max(heights[t.row] ?? 0, t.lines.length * ERA_LINE)
+    const offsets = [ERA_GAP]
+    for (const h of heights) offsets.push(offsets.at(-1)! + (h ?? 0) + ERA_GAP)
+    return offsets // offsets[r] is where row r starts; the last is the side's depth
+  }
+  const above = $derived(rowOffsets("above"))
+  const below = $derived(rowOffsets("below"))
+  const ERA_BAR_Y = $derived(ERA_TOP + above.at(-1)!)
 
-  // Years where eras meet. Each era's first year sits inside its own segment
-  // at the left end, and the last era's end at its right, when there's room;
-  // a year that won't fit inside goes just under the bar by its line, in up
-  // to two rows, and one that can't sit there either is left out (its era's
-  // dates are on its big name). BC is said once at the start and on the last
-  // year before AD.
-  const YEAR_ROW = 13
+  // Years where eras meet, inside the bar: each era's first year at the left
+  // end of its segment, and the last era's end at its right, wherever they
+  // fit. A segment too short for its year goes without (its era's dates are on
+  // its big name). BC is said once at the start and on the last year before AD.
   const YEAR_CHAR = 5.1 // width of a character in the year labels (11px PT Sans Narrow, measured)
   const yearLabel = (year: number, n: number, all: number[]) =>
     year > 0 ? `AD ${year}` : n === 0 || (all[n + 1] ?? 1) > 0 ? formatYear(year) : `${1 - year}`
@@ -141,41 +167,30 @@
       return { year, text, x: eraX(year), w: text.length * YEAR_CHAR, era: periods[Math.min(n, last)] }
     })
     const room = (p: TimelinePeriod) => eraX(p.end) - eraX(p.start)
-    const inside = labels.map((l, n) => {
-      if (n < periods.length) return l.w + 8 <= room(l.era)
-      // The end of the last era shares its segment with that era's start.
-      const start = labels[last]
-      return l.w + 8 + (start.w + 8 <= room(l.era) ? start.w + 6 : 0) <= room(l.era)
-    })
-    const outside = labels.filter((_, n) => !inside[n])
-    const spots = staggerLabels(
-      outside.map((l) => ({ at: l.x, width: l.w })),
-      4,
-      width - 4,
-      { gap: 6, slack: () => 4, maxRows: 2 },
-    )
-    const spot = new Map(outside.map((l, n) => [l, spots[n]]))
     return labels.flatMap((l, n) => {
-      if (inside[n]) {
-        const end = n === periods.length
-        return [{ ...l, inside: true, cx: end ? l.x - 4 : l.x + 4, row: 0, anchor: end ? "end" : "start" }]
-      }
-      const at = spot.get(l)
-      return at ? [{ ...l, inside: false, cx: at.x, row: at.row, anchor: "middle" }] : []
+      const end = n === periods.length
+      // The end of the last era shares its segment with that era's start.
+      const taken = end && labels[last].w + 8 <= room(l.era) ? labels[last].w + 6 : 0
+      if (l.w + 8 + taken > room(l.era)) return []
+      return [{ ...l, cx: end ? l.x - 4 : l.x + 4, anchor: end ? "end" : "start" }]
     })
   })
-  const yearRows = $derived(Math.max(0, ...eraYears.filter((l) => !l.inside).map((l) => l.row + 1)))
-  const BELOW_BAR = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + yearRows * YEAR_ROW) // where the names below start
 
-  // Each name's baseline, and where its hairline leaves the bar and meets it.
+  // Each name's first baseline and the block it fills, and where its hairline
+  // leaves the bar and meets it. Names above grow upward from the bar, names
+  // below downward.
   const eraTabs = $derived(
-    eraPlaced.map((t) =>
-      t.side === "above"
-        ? { ...t, y: ERA_BAR_Y - 5 - t.row * ERA_ROW, from: ERA_BAR_Y, to: ERA_BAR_Y - 2 - t.row * ERA_ROW }
-        : { ...t, y: BELOW_BAR + 13 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: BELOW_BAR + 2 + t.row * ERA_ROW },
-    ),
+    eraPlaced.map((t) => {
+      const h = t.lines.length * ERA_LINE
+      if (t.side === "above") {
+        const bottom = ERA_BAR_Y - above[t.row]
+        return { ...t, top: bottom - h, h, y: bottom - h + 11, from: ERA_BAR_Y, to: bottom }
+      }
+      const top = ERA_BAR_Y + ERA_SEG_H + below[t.row]
+      return { ...t, top, h, y: top + 11, from: ERA_BAR_Y + ERA_SEG_H, to: top }
+    }),
   )
-  const TOP = $derived(BELOW_BAR + 4 + rowsOn("below") * ERA_ROW + 12)
+  const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + below.at(-1)! + 10)
   const CARD_TOP = $derived(TOP + 8)
   // What's in view, marked on the era bar.
   const eraWindow = $derived.by(() => {
@@ -901,7 +916,7 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <g class="eras" class:scrubbing={scrub?.moved} onpointerdown={onBarDown} onpointermove={onBarMove} onpointerup={onBarUp} onpointercancel={onBarUp}>
       <rect class="eras-back" x="0" y="0" {width} height={TOP - 6} />
-      {#each eraTabs as { p, a, b, mid, cx, w, lx, moved, y: ly, from, to } (p.id)}
+      {#each eraTabs as { p, a, b, mid, cx, w, lines, lx, moved, top: ty, h, y: ly, from, to } (p.id)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <g
           class="era-tab"
@@ -923,17 +938,14 @@
           <rect class="era-seg" x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
           <rect class="hit" x={a} y={ERA_BAR_Y - 4} width={Math.max(4, b - a)} height={ERA_SEG_H + 8} />
           {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={from} y2={to} />{/if}
-          <rect class="hit" x={cx - w / 2 - 4} y={ly - 12} width={w + 8} height={ERA_ROW} />
-          <text class:small={narrow} x={cx} y={ly} text-anchor="middle">{p.name}</text>
+          <rect class="hit" x={cx - w / 2 - 4} y={ty} width={w + 8} height={h} />
+          <text class:small={narrow} x={cx} y={ly} text-anchor="middle"
+            >{#each lines as line, n (n)}<tspan x={cx} dy={n ? ERA_LINE : 0}>{line}</tspan>{/each}</text
+          >
         </g>
       {/each}
       {#each eraYears as l (l.year)}
-        {#if l.inside}
-          <text class="era-year inside" style="--hue: {hue(l.era)}" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H / 2 + 4} text-anchor={l.anchor}>{l.text}</text>
-        {:else}
-          <line class="era-divide" x1={l.x} x2={l.x} y1={ERA_BAR_Y - 2} y2={ERA_BAR_Y + ERA_SEG_H + 2 + l.row * YEAR_ROW} />
-          <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 12 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
-        {/if}
+        <text class="era-year inside" style="--hue: {hue(l.era)}" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H / 2 + 4} text-anchor={l.anchor}>{l.text}</text>
       {/each}
       <rect class="eras-window" x={eraWindow.x} y={ERA_BAR_Y - 3} width={eraWindow.w} height={ERA_SEG_H + 6} rx="3" />
     </g>
@@ -1352,11 +1364,6 @@
   }
   .eras.scrubbing {
     cursor: grabbing;
-  }
-  .era-divide {
-    stroke: var(--ink-3);
-    stroke-opacity: 0.5;
-    pointer-events: none;
   }
   .era-year {
     font: 11px "PT Sans Narrow", var(--sans);
