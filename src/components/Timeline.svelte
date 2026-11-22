@@ -1,8 +1,8 @@
 <script lang="ts">
   // The timeline, Creation to the early church, full screen and running top to
-  // bottom. Era names sit large down the right edge; events branch off to the
+  // bottom. Era names sit large down the left edge; events branch off to the
   // right of a gold time axis and people's lives run down its left. Click anyone
-  // to light up their connections. An overview scrollbar down the left edge
+  // to light up their connections. An overview scrollbar down the right edge
   // shows where you are in the whole story. Just left of the axis, the kingdoms
   // track shows who sat on each throne: the united monarchy forking into Israel
   // and Judah, each king coloured by his ruling house.
@@ -66,18 +66,18 @@
   let svg: SVGSVGElement
   let behavior: ZoomBehavior<SVGSVGElement, unknown>
 
-  // Columns, left to right: the overview bar, people lanes (growing leftward
+  // Columns, left to right: the era names, people lanes (growing leftward
   // from the track), the kingdoms track, tick labels, the axis, event lanes,
-  // and the era names.
+  // and the overview bar.
   // On a phone every pixel across counts: the kingdoms track slims to bare
   // blocks (tap one for its king) and people get a smaller share.
   const narrow = $derived(width < 700)
   const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
   const TRACK_GAP = $derived(narrow ? 8 : 14) // kingdoms track to the first people lane
-  const barX = $derived(narrow ? 12 : 26) // the overview bar
-  const contentL = $derived(barX + 34)
   const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
-  const contentR = $derived(width - eraW - 8)
+  const contentL = $derived(eraW + 8)
+  const barX = $derived(width - (narrow ? 12 : 26) - 18) // the overview bar
+  const contentR = $derived(barX - 16)
   const tickW = $derived(narrow ? 48 : 62)
   const trackCol = $derived(!kingdoms.kingdoms.length ? 0 : narrow ? 18 : width < 1100 ? 66 : 86)
   const colGap = $derived(narrow ? 5 : 12) // between track columns
@@ -287,7 +287,7 @@
     return `Mentioned ${span} (${n} dated ${n === 1 ? "event" : "events"})`
   }
 
-  // Large era names down the right edge, upright, wrapped to the column and
+  // Large era names down the left edge, upright, wrapped to the column and
   // sized to fit it and their band; each sticks to the top of its band and is
   // clipped to it.
   function fitTitle(text: string, room: number, tall: number) {
@@ -312,12 +312,12 @@
       return [{ p, a, b, top, ...fitTitle(p.name.toUpperCase(), room, b - top - 36) }]
     }),
   )
-  const eraRight = $derived(width - (narrow ? 12 : 22))
+  const eraLeft = $derived(narrow ? 12 : 22)
   const tickLabel = (year: number) => (year === 0 ? "BC | AD" : formatYear(year))
 
   // --- Overview bar -------------------------------------------------------------
 
-  // The whole story down the left edge, with a window on what's in view: drag
+  // The whole story down the right edge, with a window on what's in view: drag
   // it like a scrollbar.
   const stripTop = $derived(TOP + 22)
   const stripBottom = $derived(height - 36)
@@ -470,14 +470,14 @@
   const card = $derived.by(() => {
     if (!focus) return undefined
     const a = anchors.get(focus.id)
-    if (!a) return { left: width - CARD_W - 24, top: CARD_TOP }
+    if (!a) return { left: contentR - CARD_W - 8, top: CARD_TOP }
     // Beside the item if there's room on either side; otherwise tucked into
     // the top right. Level with the item's start (or the top of the view).
     const [ys, , , x0, x1] = a
     const top = Math.max(CARD_TOP, Math.min(Math.max(ys, TOP) - 40, height - 330))
     if (x1 + 24 + CARD_W < width - 16) return { left: x1 + 24, top }
     if (x0 - 24 - CARD_W > contentL) return { left: x0 - 24 - CARD_W, top }
-    return { left: width - CARD_W - 24, top: CARD_TOP }
+    return { left: contentR - CARD_W - 8, top: CARD_TOP }
   })
   const relatedPeople = $derived(
     (focus?.related ?? [])
@@ -544,14 +544,14 @@
     <!-- Eras: alternating bands, a dotted edge, and the era's name writ large -->
     {#each eraTitles as { p, a, b, top, lines, size } (p.id)}
       <rect class="band" class:alt={periods.indexOf(p) % 2 === 1} x="0" y={a} {width} height={b - a} />
-      <line class="era-edge" x1={contentL - 6} x2={width - 10} y1={y(p.start)} y2={y(p.start)} />
+      <line class="era-edge" x1="10" x2={contentR + 6} y1={y(p.start)} y2={y(p.start)} />
       {#if size >= 12}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <g class="era" onclick={() => pickPeriod(p)}>
-          <text class="era-name" clip-path="url(#tl-clip-{p.id})" x={eraRight} y={top + size * 0.8} text-anchor="end" style="font-size: {size}px"
-            >{#each lines as line, n (n)}<tspan x={eraRight} dy={n ? size * 1.05 : 0}>{line}</tspan>{/each}</text
+          <text class="era-name" clip-path="url(#tl-clip-{p.id})" x={eraLeft} y={top + size * 0.8} style="font-size: {size}px"
+            >{#each lines as line, n (n)}<tspan x={eraLeft} dy={n ? size * 1.05 : 0}>{line}</tspan>{/each}</text
           >
-          <text class="era-dates" clip-path="url(#tl-clip-{p.id})" x={eraRight} y={top + size * 0.8 + (lines.length - 1) * size * 1.05 + 22} text-anchor="end"
+          <text class="era-dates" clip-path="url(#tl-clip-{p.id})" x={eraLeft + 4} y={top + size * 0.8 + (lines.length - 1) * size * 1.05 + 22}
             >{p.when}</text
           >
         </g>
@@ -742,8 +742,8 @@
         height={Math.max(4, Math.min(stripBottom, sy(y.domain()[1])) - Math.max(stripTop, sy(y.domain()[0])))}
         rx="4"
       />
-      <text class="strip-label" x={narrow ? 4 : barX + 9} y={stripTop - 10} text-anchor={narrow ? "start" : "middle"}>Creation</text>
-      <text class="strip-label" x={narrow ? 4 : barX + 9} y={stripBottom + 22} text-anchor={narrow ? "start" : "middle"}>Early church</text>
+      <text class="strip-label" x={narrow ? width - 4 : barX + 9} y={stripTop - 10} text-anchor={narrow ? "end" : "middle"}>Creation</text>
+      <text class="strip-label" x={narrow ? width - 4 : barX + 9} y={stripBottom + 22} text-anchor={narrow ? "end" : "middle"}>Early church</text>
     </g>
 
     <rect class="vignette" {width} {height} fill="url(#tl-vignette)" />
@@ -1155,13 +1155,17 @@
     font-size: 0.85rem;
   }
 
-  /* Bottom right, above the zoom buttons: the overview bar has the left edge. */
+  /* Bottom left, over the era names column: the overview bar has the right
+     edge. The hint sits above the zoom buttons. */
+  .zoom-buttons {
+    left: max(1.5rem, env(safe-area-inset-left));
+    right: auto;
+  }
   .corner {
     position: absolute;
-    right: max(1.5rem, env(safe-area-inset-right));
+    left: max(1.5rem, env(safe-area-inset-left));
     bottom: calc(max(1.6rem, env(safe-area-inset-bottom)) + 2.9rem);
-    max-width: 13rem;
-    text-align: right;
+    max-width: 11rem;
     font-size: 0.75rem;
     color: var(--ink-3);
     pointer-events: none;
