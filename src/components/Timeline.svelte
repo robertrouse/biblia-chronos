@@ -10,9 +10,9 @@
   // It is the horizontal timeline turned a quarter turn clockwise, with every
   // label kept upright. Labels now run across the time axis instead of along
   // it, so lanes are narrow columns and a label takes as many of them as it is
-  // wide (packLanes' lanesFor). Events lanes count outward from the axis to the
-  // right, people lanes outward to the left, each label reading away from the
-  // axis.
+  // wide (packLanes' lanesFor). On both sides lanes run left to right and fill
+  // in order of time, so the story reads across as well as down: Adam, then Eve
+  // to his right, then Cain and Abel. Labels read away from the axis.
   //
   // d3-scale does the math, d3-zoom handles drag/pinch (d3-transition animates
   // jumps), the wheel scrolls, Svelte renders the SVG. Lanes are re-packed on
@@ -24,7 +24,7 @@
   import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom"
   import { select } from "d3-selection"
   import "d3-transition"
-  import { packLanes, type TimelineItem, type TimelinePeriod } from "../lib/timeline.ts"
+  import { packInTimeOrder, type TimelineItem, type TimelinePeriod } from "../lib/timeline.ts"
   import { dynasties, placeLabels, reignNote, type KingdomRow, type KingdomTrack, type Reign } from "../lib/kingdoms.ts"
   import { formatSpan, formatYear, labelWidth } from "../lib/format.ts"
   import { entityUrl, setHash } from "../lib/url.ts"
@@ -66,8 +66,7 @@
   let svg: SVGSVGElement
   let behavior: ZoomBehavior<SVGSVGElement, unknown>
 
-  // Columns, left to right: the era names, people lanes (growing leftward
-  // from the track), the kingdoms track, tick labels, the axis, event lanes,
+  // Columns, left to right: the era names, people lanes, the kingdoms track, tick labels, the axis, event lanes,
   // and the overview bar.
   // On a phone every pixel across counts: the kingdoms track slims to bare
   // blocks (tap one for its king) and people get a smaller share.
@@ -89,9 +88,10 @@
   const eventsL = $derived(axisX + AXIS_GAP)
   const eventLanes = $derived(Math.max(1, Math.floor((contentR - eventsL) / COL)))
   const peopleLanes = $derived(Math.max(1, Math.floor((peopleR - contentL) / COL)))
-  // Where a lane's mark sits: its first column, nearest the axis.
+  // Where a lane's mark sits: the column of the item's nearest the axis, with
+  // its label on the far side.
   const eventX = (lane: number) => eventsL + lane * COL + COL / 2
-  const personX = (lane: number) => peopleR - lane * COL - COL / 2
+  const personX = (lane: number) => contentL + lane * COL + COL / 2
 
   const base = $derived(scaleLinear().domain(domain).range([TOP, height - BOTTOM]))
   const y = $derived(transform.rescaleY(base))
@@ -148,7 +148,7 @@
     ),
   )
   const lanes = (kind: TimelineItem["kind"], maxLanes: number) =>
-    packLanes(items.filter((i) => i.kind === kind && !onTrack.has(i.id)), priority, extent, maxLanes, 4, lanesFor).placed
+    packInTimeOrder(items.filter((i) => i.kind === kind && !onTrack.has(i.id)), priority, (i) => i.start, extent, maxLanes, 4, lanesFor)
   const eventLayout = $derived(lanes("event", eventLanes))
   const peopleLayout = $derived(lanes("person", peopleLanes))
   // World to screen is a shift by the pan, so culling is cheap.
@@ -260,8 +260,9 @@
       ...visible.flatMap((placed) =>
         placed.map(({ item, lane }) => {
           const event = item.kind === "event"
-          const mx = event ? eventX(lane) : personX(lane)
-          const w = lanesFor(item) * COL
+          const n = lanesFor(item)
+          const mx = event ? eventX(lane) : personX(lane + n - 1)
+          const w = n * COL
           const [l, r] = event ? [mx - COL / 2, mx - COL / 2 + w] : [mx + COL / 2 - w, mx + COL / 2]
           return [item.id, [y(item.start), y(item.end), mx, l, r] as const] as const
         }),

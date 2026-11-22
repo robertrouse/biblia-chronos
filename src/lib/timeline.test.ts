@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { packLanes, timelineItems } from "./timeline.ts"
+import { packInTimeOrder, packLanes, timelineItems } from "./timeline.ts"
 import type { Event, Period, Person } from "./data/schema.ts"
 
 type Box = { id: string; x0: number; x1: number; w: number }
@@ -39,6 +39,16 @@ test("packLanes fits a multi-lane item into the first run of free lanes", () => 
   assert.deepEqual(lane, { a: 0, b: 1, wide: 2 })
   // Too wide for the lanes left: hidden
   assert.equal(packLanes(items, (b) => b.w, (b) => [b.x0, b.x1], 4, 0, (b) => (b.id === "wide" ? 3 : 1)).hidden, 1)
+})
+
+test("packInTimeOrder keeps the heaviest but lays them out earliest first", () => {
+  // Adam is heaviest but Eve, Cain and Abel all overlap him; Seth starts after Abel ends.
+  const items = [box("cain", 2, 20, 5), box("adam", 0, 30, 9), box("abel", 3, 8, 2), box("eve", 1, 25, 6), box("seth", 9, 29, 1)]
+  const lane = (max: number) =>
+    Object.fromEntries(packInTimeOrder(items, (b) => b.w, (b) => b.x0, (b) => [b.x0, b.x1], max, 0).map((p) => [p.item.id, p.lane]))
+  assert.deepEqual(lane(5), { adam: 0, eve: 1, cain: 2, abel: 3, seth: 3 })
+  // With room for three, the lightest overlapping item (Abel) is the one left out
+  assert.deepEqual(lane(3), { adam: 0, eve: 1, cain: 2 })
 })
 
 const period: Period = { id: "p", name: "Era", kind: "period", source: "t", date: { earliest: -100, latest: 0 } }

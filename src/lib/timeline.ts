@@ -146,6 +146,27 @@ export function packLanes<T>(
   return { placed, hidden }
 }
 
+// Which items show is decided by weight; where they go, by time. The heaviest
+// that fit are kept (packLanes), then laid out again earliest first, so the
+// lanes read in story order: the first to appear takes the first lane, and
+// each later one the first lane free beside it. Re-packing the same items
+// rarely loses one (in time order a set of overlapping spans needs no more
+// lanes than it did); any that no longer fit are dropped.
+export function packInTimeOrder<T>(
+  items: T[],
+  weight: (item: T) => number,
+  start: (item: T) => number,
+  extent: (item: T) => [number, number],
+  maxLanes: number,
+  gap = 8,
+  lanesFor: (item: T) => number = () => 1,
+): Placed<T>[] {
+  const shown = packLanes(items, weight, extent, maxLanes, gap, lanesFor).placed.map((p) => p.item)
+  // packLanes takes the heaviest first, so the earliest start is the heaviest;
+  // its sort is stable, so items that start together keep their weight order.
+  return packLanes(shown, (i) => -start(i), extent, maxLanes, gap, lanesFor).placed
+}
+
 // The index of the first span in a sorted lane that ends after `x`.
 function firstEndingAfter(lane: [number, number][], x: number) {
   let [lo, hi] = [0, lane.length]
