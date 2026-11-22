@@ -92,7 +92,13 @@ export type Placed<T> = { item: T; lane: number; x0: number; x1: number }
 // Greedy packing in pixel space. Items are placed heaviest first, each into
 // the first lane where its extent (mark plus label) doesn't collide; items
 // that fit nowhere within `maxLanes` are dropped and counted, so zooming in
-// reveals them. `extent` returns an item's [left, right] in pixels.
+// reveals them. `extent` returns an item's [start, end] along the time axis,
+// in pixels.
+//
+// An item may span several adjacent lanes (`lanesFor`): on the vertical
+// timeline lanes are narrow columns and a label, written across the time
+// axis, takes as many columns as it is wide. It goes in the first run of
+// lanes that are all free over its extent.
 //
 // Each lane keeps its spans sorted by position (they never overlap), so a fit
 // is a binary search: fast enough to pack thousands of items per frame.
@@ -102,25 +108,39 @@ export function packLanes<T>(
   extent: (item: T) => [number, number],
   maxLanes: number,
   gap = 8,
+  lanesFor: (item: T) => number = () => 1,
 ): { placed: Placed<T>[]; hidden: number } {
   const lanes: [number, number][][] = []
   const placed: Placed<T>[] = []
   let hidden = 0
+  const fits = (l: number, x0: number, x1: number) => {
+    const lane = lanes[l]
+    if (!lane) return true
+    const at = firstEndingAfter(lane, x0 - gap)
+    return at === lane.length || lane[at][0] >= x1 + gap
+  }
 
   for (const item of [...items].sort((a, b) => weight(b) - weight(a))) {
     const [x0, x1] = extent(item)
+    const n = Math.max(1, lanesFor(item))
     let lane = -1
-    let at = 0
-    for (let l = 0; l < lanes.length && lane === -1; l++) {
-      at = firstEndingAfter(lanes[l], x0 - gap)
-      if (at === lanes[l].length || lanes[l][at][0] >= x1 + gap) lane = l
+    for (let l = 0; l + n <= maxLanes; ) {
+      let j = 0
+      while (j < n && fits(l + j, x0, x1)) j++
+      if (j === n) {
+        lane = l
+        break
+      }
+      l += j + 1 // every run starting at or before the blocked lane is blocked too
     }
-    if (lane === -1 && lanes.length < maxLanes) [lane, at] = [lanes.push([]) - 1, 0]
     if (lane === -1) {
       hidden++
       continue
     }
-    lanes[lane].splice(at, 0, [x0, x1])
+    for (let l = lane; l < lane + n; l++) {
+      while (lanes.length <= l) lanes.push([])
+      lanes[l].splice(firstEndingAfter(lanes[l], x0 - gap), 0, [x0, x1])
+    }
     placed.push({ item, lane, x0, x1 })
   }
   return { placed, hidden }

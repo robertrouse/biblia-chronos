@@ -32,6 +32,15 @@ test("packLanes drops the lightest items when lanes run out", () => {
   assert.equal(hidden, 1)
 })
 
+test("packLanes fits a multi-lane item into the first run of free lanes", () => {
+  const items = [box("a", 0, 10, 9), box("b", 0, 10, 8), box("wide", 0, 10, 1)]
+  const { placed } = packLanes(items, (b) => b.w, (b) => [b.x0, b.x1], 6, 0, (b) => (b.id === "wide" ? 3 : 1))
+  const lane = Object.fromEntries(placed.map((p) => [p.item.id, p.lane]))
+  assert.deepEqual(lane, { a: 0, b: 1, wide: 2 })
+  // Too wide for the lanes left: hidden
+  assert.equal(packLanes(items, (b) => b.w, (b) => [b.x0, b.x1], 4, 0, (b) => (b.id === "wide" ? 3 : 1)).hidden, 1)
+})
+
 const period: Period = { id: "p", name: "Era", kind: "period", source: "t", date: { earliest: -100, latest: 0 } }
 const event = (id: string, earliest: number, latest = earliest): Event => ({
   id, name: id, kind: "event", source: "t", date: { earliest, latest },

@@ -1,14 +1,22 @@
 <script lang="ts">
-  // The timeline, Creation to the early church, full screen. Era names sit large in the
-  // background; events rise above a gold time axis and people's lives run
-  // below it. Click anyone to light up their connections. An overview strip at
-  // the bottom shows where you are in the whole story. Just under the axis,
-  // the kingdoms track shows who sat on each throne: the united monarchy
-  // forking into Israel and Judah, each king coloured by his ruling house.
+  // The timeline, Creation to the early church, full screen and running top to
+  // bottom. Era names sit large down the right edge; events branch off to the
+  // right of a gold time axis and people's lives run down its left. Click anyone
+  // to light up their connections. An overview scrollbar down the left edge
+  // shows where you are in the whole story. Just left of the axis, the kingdoms
+  // track shows who sat on each throne: the united monarchy forking into Israel
+  // and Judah, each king coloured by his ruling house.
   //
-  // d3-scale does the math, d3-zoom handles wheel/drag/pinch (d3-transition
-  // animates jumps), Svelte renders the SVG. Lanes are re-packed on every
-  // zoom (not on pan), heaviest first, so zooming in reveals more.
+  // It is the horizontal timeline turned a quarter turn clockwise, with every
+  // label kept upright. Labels now run across the time axis instead of along
+  // it, so lanes are narrow columns and a label takes as many of them as it is
+  // wide (packLanes' lanesFor). Events lanes count outward from the axis to the
+  // right, people lanes outward to the left, each label reading away from the
+  // axis.
+  //
+  // d3-scale does the math, d3-zoom handles drag/pinch (d3-transition animates
+  // jumps), the wheel scrolls, Svelte renders the SVG. Lanes are re-packed on
+  // every zoom (not on pan), heaviest first, so zooming in reveals more.
   import { onMount } from "svelte"
   import { fade, scale } from "svelte/transition"
   import { cubicOut } from "svelte/easing"
@@ -27,22 +35,18 @@
   let { items, periods, kingdoms }: { items: TimelineItem[]; periods: TimelinePeriod[]; kingdoms: KingdomTrack } =
     $props()
 
-  // Layout, in px. Vertical positions follow the window height.
-  const ERA_TOP = 96 // baseline area for the large era names
-  const FIRST_LANE_TOP = 200 // nothing above this but era names
-  const EVENT_GAP = 32
-  const PERSON_GAP = 30
-  const STRIP = 64 // overview strip area at the bottom
+  // Layout, in px. Time runs down from TOP (under the site bar) to BOTTOM;
+  // horizontal positions follow the window width.
+  const TOP = 76
+  const BOTTOM = 28
+  const COL = 8 // one lane; a label takes as many as it is wide
+  const LABEL_H = 16 // a label's height, along the time axis
   const CARD_W = 340
   const CARD_TOP = 84 // below the site bar
-  const TRACK_GAP = 40 // axis to the kingdoms track, below the tick labels
-  const TRACK_LABEL = 14 // a row's label line: the kingdom, then its houses
-  const TRACK_BLOCK = 18
-  const TRACK_ROW = TRACK_LABEL + TRACK_BLOCK + 6
 
   const domain = $derived([periods[0].start, periods[periods.length - 1].end])
   // A first visit opens on Abraham onward, where most of the story is; the
-  // eras before him are a pan (or a click on the overview strip) away.
+  // eras before him are a scroll (or a click on the overview bar) away.
   const opening = $derived(periods.find((p) => p.id === "patriarchs")?.start ?? periods[0].start)
   const byId = $derived(new Map(items.map((i) => [i.id, i])))
   const maxWeight = $derived(Math.max(...items.map((i) => i.weight)))
@@ -62,17 +66,36 @@
   let svg: SVGSVGElement
   let behavior: ZoomBehavior<SVGSVGElement, unknown>
 
-  const axisY = $derived(Math.max(FIRST_LANE_TOP + 2 * EVENT_GAP + 40, Math.round(height * 0.47)))
-  const eventLanes = $derived(Math.floor((axisY - 40 - FIRST_LANE_TOP) / EVENT_GAP) + 1)
-  const trackTop = $derived(axisY + TRACK_GAP)
-  const peopleTop = $derived(kingdoms.kingdoms.length ? trackTop + kingdoms.rows * TRACK_ROW + 24 : axisY + 50)
-  const peopleLanes = $derived(Math.max(1, Math.floor((height - STRIP - 30 - peopleTop) / PERSON_GAP) + 1))
-  const eventY = (lane: number) => axisY - 40 - lane * EVENT_GAP
-  const personY = (lane: number) => peopleTop + lane * PERSON_GAP
+  // Columns, left to right: the overview bar, people lanes (growing leftward
+  // from the track), the kingdoms track, tick labels, the axis, event lanes,
+  // and the era names.
+  // On a phone every pixel across counts: the kingdoms track slims to bare
+  // blocks (tap one for its king) and people get a smaller share.
+  const narrow = $derived(width < 700)
+  const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
+  const TRACK_GAP = $derived(narrow ? 8 : 14) // kingdoms track to the first people lane
+  const barX = $derived(narrow ? 12 : 26) // the overview bar
+  const contentL = $derived(barX + 34)
+  const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
+  const contentR = $derived(width - eraW - 8)
+  const tickW = $derived(narrow ? 48 : 62)
+  const trackCol = $derived(!kingdoms.kingdoms.length ? 0 : narrow ? 18 : width < 1100 ? 66 : 86)
+  const colGap = $derived(narrow ? 5 : 12) // between track columns
+  const trackW = $derived(kingdoms.rows * trackCol)
+  const free = $derived(Math.max(120, contentR - contentL - tickW - trackW - TRACK_GAP - AXIS_GAP))
+  const peopleR = $derived(contentL + Math.round(free * (narrow ? 0.4 : 0.55))) // right edge of the people lanes
+  const trackR = $derived(peopleR + TRACK_GAP + trackW)
+  const axisX = $derived(trackR + tickW)
+  const eventsL = $derived(axisX + AXIS_GAP)
+  const eventLanes = $derived(Math.max(1, Math.floor((contentR - eventsL) / COL)))
+  const peopleLanes = $derived(Math.max(1, Math.floor((peopleR - contentL) / COL)))
+  // Where a lane's mark sits: its first column, nearest the axis.
+  const eventX = (lane: number) => eventsL + lane * COL + COL / 2
+  const personX = (lane: number) => peopleR - lane * COL - COL / 2
 
-  const base = $derived(scaleLinear().domain(domain).range([0, width]))
-  const x = $derived(transform.rescaleX(base))
-  const ticks = $derived(x.ticks(Math.max(2, Math.floor(width / 130))).filter(Number.isInteger))
+  const base = $derived(scaleLinear().domain(domain).range([TOP, height - BOTTOM]))
+  const y = $derived(transform.rescaleY(base))
+  const ticks = $derived(y.ticks(Math.max(2, Math.floor((height - TOP) / 80))).filter(Number.isInteger))
 
   const isItem = (s: TimelineItem | TimelinePeriod | undefined): s is TimelineItem => !!s && "kind" in s
   const focus = $derived(isItem(selected) ? selected : undefined)
@@ -81,18 +104,36 @@
   // Anything on the timeline (an item, a reign, a kingdom) by its id.
   const dimmed = (id: string) => !!focus && id !== focus.id && !related.has(id)
 
+  const dotRadius = (i: TimelineItem) => 3 + 2.5 * Math.sqrt(i.weight / maxWeight)
+  const ribbon = (i: TimelineItem) => 4 + 4 * Math.sqrt(i.weight / maxWeight)
+  const strong = (i: TimelineItem) => i.weight > maxWeight * 0.12
+
+  // Labels, written across the time axis. A label never runs wider than its
+  // side of the axis: on a phone a long name is cut short rather than lost.
+  const fontScale = (i: TimelineItem) => (i === focus ? 1.3 : strong(i) ? 1.12 : 1)
+  function nameOf(i: TimelineItem) {
+    const room = (i.kind === "event" ? eventLanes : peopleLanes) * COL - 24
+    if (labelWidth(i.name) * fontScale(i) <= room) return i.name
+    const chars = Math.max(1, Math.floor(room / (6.6 * fontScale(i))) - 1)
+    return i.name.slice(0, chars).trimEnd() + "…"
+  }
+  const nameWidth = (i: TimelineItem) => labelWidth(nameOf(i)) * fontScale(i)
+  // How many lanes an item takes across the axis: its mark, then its label.
+  const lanesFor = (i: TimelineItem) => Math.ceil((COL / 2 + 12 + nameWidth(i)) / COL)
+
   // Lanes are packed in "world" pixels: the whole timeline at the current zoom
   // with no pan applied, not just what's in view. Dragging only pans, so
   // nothing changes lane mid-drag; lanes change only when the zoom does.
   const k = $derived(transform.k)
-  const world = $derived(scaleLinear().domain(domain).range([0, width * k]))
-  // An item's footprint: its mark plus its label, which starts at the mark.
-  // Attested people's traces fade out past their first and last sighting.
+  const world = $derived(scaleLinear().domain(domain).range([TOP * k, (height - BOTTOM) * k]))
+  // An item's footprint along time: its mark, padded, with room at its start
+  // for the label. Attested people's traces fade out past their first and
+  // last sighting.
   const FADE = 16
   const pad = (i: TimelineItem) => (i.kind === "person" && !i.lifetime ? FADE : 6)
   function extent(i: TimelineItem): [number, number] {
-    const left = world(i.start) - pad(i)
-    return [left, Math.max(world(i.end) + pad(i), left + labelWidth(i.name))]
+    const top = world(i.start) - Math.max(pad(i), LABEL_H / 2)
+    return [top, Math.max(world(i.end) + pad(i), top + LABEL_H)]
   }
   // The selection and its connections jump the queue, so they're always shown.
   const priority = (i: TimelineItem) => (i === focus ? 2e9 : related.has(i.id) ? 1e9 + i.weight : i.weight)
@@ -107,57 +148,85 @@
     ),
   )
   const lanes = (kind: TimelineItem["kind"], maxLanes: number) =>
-    packLanes(items.filter((i) => i.kind === kind && !onTrack.has(i.id)), priority, extent, maxLanes, 12).placed
+    packLanes(items.filter((i) => i.kind === kind && !onTrack.has(i.id)), priority, extent, maxLanes, 4, lanesFor).placed
   const eventLayout = $derived(lanes("event", eventLanes))
   const peopleLayout = $derived(lanes("person", peopleLanes))
   // World to screen is a shift by the pan, so culling is cheap.
   const inView = (placed: typeof eventLayout) =>
-    placed.filter(({ x0, x1 }) => x1 + transform.x > 0 && x0 + transform.x < width)
+    placed.filter(({ x0, x1 }) => x1 + transform.y > 0 && x0 + transform.y < height)
   const visible = $derived([inView(eventLayout), inView(peopleLayout)])
 
   // --- Kingdoms track ----------------------------------------------------------
 
-  // A kingdom's box: its label line, and the top and bottom of its blocks. The
-  // united monarchy spans every row, so the track forks where the kingdom split.
+  // A kingdom's column. Rows count outward from the axis, so row 0 is nearest
+  // it; the united monarchy spans every row, so the track forks where the
+  // kingdom split. The gap on the far side holds co-regents' stripes.
   function rowBox(k: KingdomRow) {
     const [first, last] = k.row === "all" ? [0, kingdoms.rows - 1] : [k.row, k.row]
-    const top = trackTop + first * TRACK_ROW
-    return { label: top + 10, y0: top + TRACK_LABEL, y1: trackTop + last * TRACK_ROW + TRACK_LABEL + TRACK_BLOCK }
+    return { x0: trackR - (last + 1) * trackCol + colGap, x1: trackR - first * trackCol }
   }
-  const kingdomLabel = (k: KingdomRow) => (k.region ? `${k.name} · ${k.region}` : k.name).toUpperCase()
-  // Rough widths of the track's text, like labelWidth: spaced caps, italic serif.
-  const capsWidth = (text: string) => text.length * 8
-  const houseWidth = (text: string) => text.length * 6
+  // Labels sit at the top of what they name, two lines each: a kingdom and its
+  // region, or a house ("House of" / "Omri"). They stick to the top of the view
+  // while what they name runs off it, and never overlap each other.
+  const LABEL_LINES = 24
+  const houseName = (name: string) => name.replace(/^House of /, "")
 
   const trackView = $derived(
     kingdoms.kingdoms
-      .filter((k) => x(k.end) > 0 && x(k.start) < width)
+      .filter((k) => y(k.end) > 0 && y(k.start) < height)
       .map((k) => {
         const box = rowBox(k)
-        const reigns = k.reigns.filter((r) => x(r.end) > -4 && x(r.start) < width + 4)
-        const labels = placeLabels([
-          { text: kingdomLabel(k), start: x(k.start), end: x(k.end), width: capsWidth(kingdomLabel(k)), tone: -1 },
-          ...k.houses
-            .filter((h) => h.named)
-            .map((h) => ({ text: h.name, start: x(h.start), end: x(h.end), width: houseWidth(h.name), tone: h.tone })),
-        ])
+        const reigns = k.reigns.filter((r) => y(r.end) > -4 && y(r.start) < height + 4)
+        const labels = narrow ? [] : placeLabels(
+          [
+            { text: k.name.toUpperCase(), sub: k.region?.toUpperCase(), start: y(k.start), end: y(k.end), width: LABEL_LINES, tone: -1 },
+            ...k.houses
+              .filter((h) => h.named)
+              .map((h) => ({ text: houseName(h.name), sub: undefined, start: y(h.start), end: y(h.end), width: LABEL_LINES, tone: h.tone })),
+          ],
+          TOP + 2,
+          6,
+        )
         return { k, box, reigns, labels }
       }),
   )
   // Where a reign's block is drawn. The main line is a segmented bar: a hairline
   // between kings, a wider gap where the house changes. A co-regent or rival
-  // is a thin stripe just under the row.
+  // is a thin stripe just outside the column.
   function reignBox(r: Reign, box: ReturnType<typeof rowBox>) {
     if (r.sub) {
-      const x0 = x(r.start)
-      return { x0, w: Math.max(3, x(r.end) - x0), y: box.y1 + 2 + (r.sub - 1) * 4, h: 3 }
+      const y0 = y(r.start)
+      return { x: box.x0 - Math.min(5, colGap - 1) - (r.sub - 1) * 4, w: 3, y: y0, h: Math.max(3, y(r.end) - y0) }
     }
-    const x0 = x(r.start) + (r.opens ? 1.5 : 0.5)
-    const x1 = x(r.end) - (r.closes ? 1.5 : 0.5)
-    return { x0, w: Math.max(3, x1 - x0), y: box.y0, h: box.y1 - box.y0 }
+    const y0 = y(r.start) + (r.opens ? 1.5 : 0.5)
+    const y1 = y(r.end) - (r.closes ? 1.5 : 0.5)
+    return { x: box.x0, w: box.x1 - box.x0, y: y0, h: Math.max(3, y1 - y0) }
   }
   const tall = (k: KingdomRow) => k.row === "all" && kingdoms.rows > 1
   const kingWidth = (r: Reign, k: KingdomRow) => r.king.length * (tall(k) ? 7.6 : 6.4)
+  // A king's name, centred in what's visible of his block, if it fits there
+  // and stays clear of the track's labels.
+  function kingY(b: ReturnType<typeof reignBox>, labels: { x: number }[]) {
+    const top = Math.max(b.y, TOP)
+    const bottom = Math.min(b.y + b.h, height)
+    if (bottom - top < 15) return undefined
+    const at = (top + bottom) / 2
+    if (labels.some((l) => at > l.x - 8 && at < l.x + LABEL_LINES + 8)) {
+      const below = Math.max(...labels.filter((l) => l.x < bottom && l.x + LABEL_LINES > top).map((l) => l.x + LABEL_LINES + 12))
+      return below + 4 < bottom ? below : undefined
+    }
+    return at + 4
+  }
+  // Words wrapped to lines no wider than `room` px, at `perChar` px a letter.
+  function wrap(text: string, room: number, perChar: number) {
+    const lines: string[] = []
+    for (const word of text.split(" ")) {
+      const last = lines.at(-1)
+      if (last && (last.length + 1 + word.length) * perChar <= room) lines[lines.length - 1] = `${last} ${word}`
+      else lines.push(word)
+    }
+    return lines
+  }
 
   function pickTrack(id: string) {
     const item = byId.get(id)
@@ -183,26 +252,31 @@
     return `${k.reigns.length} kings · ${houses} royal ${houses === 1 ? "house" : "houses"}${k.fate ? ` · ${k.fate}` : ""}`
   }
 
-  // Where each placed item is drawn: [left, right, y], for links and the card.
+  // Where each placed item is drawn: [top, bottom, mark x, left, right], for
+  // links and the card.
+  type Anchor = readonly [number, number, number, number, number]
   const anchors = $derived(
-    new Map([
+    new Map<string, Anchor>([
       ...visible.flatMap((placed) =>
         placed.map(({ item, lane }) => {
-          const y = item.kind === "event" ? eventY(lane) : personY(lane)
-          return [item.id, [x(item.start), x(item.end), y]] as const
+          const event = item.kind === "event"
+          const mx = event ? eventX(lane) : personX(lane)
+          const w = lanesFor(item) * COL
+          const [l, r] = event ? [mx - COL / 2, mx - COL / 2 + w] : [mx + COL / 2 - w, mx + COL / 2]
+          return [item.id, [y(item.start), y(item.end), mx, l, r] as const] as const
         }),
       ),
       ...trackView.flatMap(({ box, reigns }) =>
         reigns.map((r) => {
           const b = reignBox(r, box)
-          return [r.id, [b.x0, b.x0 + b.w, b.y + b.h / 2]] as const
+          return [r.id, [b.y, b.y + b.h, b.x + b.w / 2, b.x, b.x + b.w] as const] as const
         }),
       ),
     ]),
   )
-  // A label sticks to the left edge while its item runs off-screen, but never
-  // slides out of the item's footprint (where it could hit a neighbour).
-  const labelX = (i: TimelineItem, xs: number, xe: number) => Math.max(xs, Math.min(6, xe + 6 - labelWidth(i.name)))
+  // A label's centre line sticks to the top of the view while its item runs
+  // off it, but never slides past the item's end.
+  const labelY = (ys: number, ye: number) => Math.max(ys, Math.min(TOP + 10, ye))
 
   // When an item is: a person we only see at a few dated moments says so, so
   // the span doesn't read as a lifetime.
@@ -213,33 +287,46 @@
     return `Mentioned ${span} (${n} dated ${n === 1 ? "event" : "events"})`
   }
 
-  const dotRadius = (i: TimelineItem) => 3 + 2.5 * Math.sqrt(i.weight / maxWeight)
-  const ribbon = (i: TimelineItem) => 4 + 4 * Math.sqrt(i.weight / maxWeight)
-  const strong = (i: TimelineItem) => i.weight > maxWeight * 0.12
-
-  // Large era names, sized to their band and clipped to it.
+  // Large era names down the right edge, upright, wrapped to the column and
+  // sized to fit it and their band; each sticks to the top of its band and is
+  // clipped to it.
+  function fitTitle(text: string, room: number, tall: number) {
+    const words = text.split(" ")
+    let best = { lines: [text], size: 0 }
+    for (let n = 1; n <= words.length; n++) {
+      const lines = wrap(text, Math.max(...words.map((w) => w.length), Math.ceil(text.length / n)), 1)
+      if (lines.length > n) continue
+      const longest = Math.max(...lines.map((l) => l.length))
+      const size = Math.min(56, room / (longest * 0.82), tall / (lines.length * 1.05))
+      if (size > best.size) best = { lines, size }
+    }
+    return best
+  }
   const eraTitles = $derived(
     periods.flatMap((p) => {
-      const a = Math.max(0, x(p.start))
-      const b = Math.min(width, x(p.end))
-      const left = Math.max(x(p.start), 0) + 20
-      const size = Math.min(72, (b - left - 24) / (p.name.length * 0.85))
-      return b > a ? [{ p, a, b, left, size }] : []
+      const a = Math.max(0, y(p.start))
+      const b = Math.min(height, y(p.end))
+      if (b <= a) return []
+      const top = Math.max(y(p.start), TOP) + 18
+      const room = (narrow ? Math.min(150, width * 0.4) : eraW) - 24
+      return [{ p, a, b, top, ...fitTitle(p.name.toUpperCase(), room, b - top - 36) }]
     }),
   )
+  const eraRight = $derived(width - (narrow ? 12 : 22))
   const tickLabel = (year: number) => (year === 0 ? "BC | AD" : formatYear(year))
 
-  // --- Overview strip ---------------------------------------------------------
+  // --- Overview bar -------------------------------------------------------------
 
-  const stripW = $derived(Math.max(200, Math.min(820, width - (width < 700 ? 32 : 380))))
-  const stripX = $derived((width - stripW) / 2)
-  const stripY = $derived(height - 44)
-  const sx = $derived(scaleLinear().domain(domain).range([stripX, stripX + stripW]))
+  // The whole story down the left edge, with a window on what's in view: drag
+  // it like a scrollbar.
+  const stripTop = $derived(TOP + 22)
+  const stripBottom = $derived(height - 36)
+  const sy = $derived(scaleLinear().domain(domain).range([stripTop, stripBottom]))
   const density = $derived.by(() => {
     const bins = new Map<number, number>()
     for (const i of items) {
       if (i.start < domain[0]) continue // starts before the first era
-      const b = Math.floor(sx(i.start) / 4) * 4
+      const b = Math.floor(sy(i.start) / 4) * 4
       bins.set(b, (bins.get(b) ?? 0) + 1)
     }
     return [...bins]
@@ -247,10 +334,19 @@
   function onStrip(e: PointerEvent) {
     if (e.type === "pointerdown") (e.currentTarget as Element).setPointerCapture(e.pointerId)
     else if (!(e.buttons & 1)) return
-    behavior.translateTo(select(svg), base(sx.invert(e.offsetX)), height / 2)
+    behavior.translateTo(select(svg), width / 2, base(sy.invert(e.offsetY)))
   }
 
   // --- Zoom and navigation ----------------------------------------------------
+
+  // The zoom works on the stretch of the window time runs through.
+  function bound() {
+    const box: [[number, number], [number, number]] = [
+      [0, TOP],
+      [width, height - BOTTOM],
+    ]
+    behavior?.extent(box).translateExtent(box)
+  }
 
   onMount(() => {
     // Measure now rather than waiting for the resize observer behind
@@ -260,21 +356,29 @@
 
     behavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([1, 800])
-      // Sideways wheel (trackpads) pans instead (below); the strip handles its own drags.
+      // The wheel scrolls (below); a pinch, or Ctrl/⌘ and the wheel, zooms. The
+      // overview bar handles its own drags.
       .filter(
         (e) =>
           !e.button &&
           !(e.target as Element).closest?.(".strip") &&
-          (e.type !== "wheel" || Math.abs(e.deltaY) >= Math.abs(e.deltaX)),
+          (e.type !== "wheel" || e.ctrlKey || e.metaKey),
       )
-      .on("zoom", (e) => (transform = e.transform))
+      .on("zoom", (e) => {
+        transform = e.transform
+        // What was under the pointer has moved on; its tooltip goes with it.
+        if (e.sourceEvent) hovered = undefined
+      })
+    bound()
     select(svg).call(behavior)
-    addInertia(behavior, svg, "x")
+    addInertia(behavior, svg, "y")
 
     const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return
+      if (e.ctrlKey || e.metaKey) return // a pinch: d3-zoom's
       e.preventDefault()
-      behavior.translateBy(select(svg), -e.deltaX / transform.k, 0)
+      hovered = undefined
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1)
+      behavior.translateBy(select(svg), 0, -dy / transform.k)
     }
     svg.addEventListener("wheel", onWheel, { passive: false })
 
@@ -289,7 +393,7 @@
       behavior.transform(select(svg), span(saved.span[0], saved.span[1]))
       selected = saved.selected ? lookup(saved.selected) : undefined
     } else behavior.transform(select(svg), span(opening, domain[1]))
-    const forget = view.onLeave(() => ({ span: x.domain(), selected: selected?.id }))
+    const forget = view.onLeave(() => ({ span: y.domain(), selected: selected?.id }))
     // Show it once that view is drawn (two frames: past this update and its
     // layout), so nothing slides or fades into place on the way in.
     let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(() => (ready = true))))
@@ -311,17 +415,7 @@
   })
 
   // Keep zoom bounds in step with the window.
-  $effect(() => {
-    behavior
-      ?.extent([
-        [0, 0],
-        [width, height],
-      ])
-      .translateExtent([
-        [0, 0],
-        [width, height],
-      ])
-  })
+  $effect(bound)
 
   // A selection is shareable: it lives in the URL hash.
   $effect(() => {
@@ -331,8 +425,8 @@
 
   // The view that shows exactly [start, end].
   function span(start: number, end: number) {
-    const k = width / (base(end) - base(start))
-    return zoomIdentity.scale(k).translate(-base(start), 0)
+    const k = (height - BOTTOM - TOP) / (base(end) - base(start))
+    return zoomIdentity.translate(0, TOP - k * base(start)).scale(k)
   }
   // Glide to show [start, end] with some room around it (or jump there).
   function flyTo(start: number, end: number, glide = true) {
@@ -359,10 +453,12 @@
 
   function onKey(e: KeyboardEvent) {
     if (e.target instanceof HTMLInputElement) return
-    const step = width / 8 / transform.k
+    const step = (height - TOP) / 8 / transform.k
     if (e.key === "Escape") selected = undefined
-    else if (e.key === "ArrowLeft") behavior.translateBy(select(svg), step, 0)
-    else if (e.key === "ArrowRight") behavior.translateBy(select(svg), -step, 0)
+    else if (e.key === "ArrowUp") behavior.translateBy(select(svg), 0, step)
+    else if (e.key === "ArrowDown") behavior.translateBy(select(svg), 0, -step)
+    else if (e.key === "PageUp") behavior.translateBy(select(svg), 0, step * 6)
+    else if (e.key === "PageDown") behavior.translateBy(select(svg), 0, -step * 6)
     else if (e.key === "+" || e.key === "=") zoomBy(1.6)
     else if (e.key === "-") zoomBy(1 / 1.6)
     else return
@@ -375,12 +471,12 @@
     if (!focus) return undefined
     const a = anchors.get(focus.id)
     if (!a) return { left: width - CARD_W - 24, top: CARD_TOP }
-    // Beside the mark if there's room on either side; otherwise (a bar wider
-    // than the window) tucked into the top right.
-    const [x0, x1, y] = a
-    const top = Math.max(CARD_TOP, Math.min(y - 120, height - STRIP - 290))
-    if (x1 + 28 + CARD_W < width - 16) return { left: x1 + 28, top }
-    if (x0 - 28 - CARD_W > 16) return { left: x0 - 28 - CARD_W, top }
+    // Beside the item if there's room on either side; otherwise tucked into
+    // the top right. Level with the item's start (or the top of the view).
+    const [ys, , , x0, x1] = a
+    const top = Math.max(CARD_TOP, Math.min(Math.max(ys, TOP) - 40, height - 330))
+    if (x1 + 24 + CARD_W < width - 16) return { left: x1 + 24, top }
+    if (x0 - 24 - CARD_W > contentL) return { left: x0 - 24 - CARD_W, top }
     return { left: width - CARD_W - 24, top: CARD_TOP }
   })
   const relatedPeople = $derived(
@@ -397,24 +493,25 @@
 <div class="timeline reveal" class:ready bind:this={root} bind:clientWidth={width} bind:clientHeight={height}>
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <svg
+    id="timeline-canvas"
     class="veiled"
     bind:this={svg}
     viewBox="0 0 {width} {height}"
     role="application"
-    aria-label="Timeline from Creation to the early church. Arrow keys pan, plus and minus zoom, slash searches."
+    aria-label="Timeline from Creation to the early church, top to bottom. Up and down arrows scroll, plus and minus zoom, slash searches."
     onclick={(e) => {
       if (e.target === svg || (e.target as Element).classList.contains("band")) selected = undefined
     }}
   >
     <defs>
-      <linearGradient id="tl-axis" gradientUnits="userSpaceOnUse" x1="0" x2={width} y1="0" y2="0">
+      <linearGradient id="tl-axis" gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="0" y2={height}>
         <stop offset="0" style="stop-color: var(--gold); stop-opacity: 0" />
         <stop offset="0.12" style="stop-color: var(--gold)" />
         <stop offset="0.88" style="stop-color: var(--gold)" />
         <stop offset="1" style="stop-color: var(--gold); stop-opacity: 0" />
       </linearGradient>
       {#each [["tl-person", "--people"], ["tl-focus", "--accent"]] as [id, color] (id)}
-        <linearGradient {id}>
+        <linearGradient {id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" style="stop-color: var({color}); stop-opacity: 0.35" />
           <stop offset="0.15" style="stop-color: var({color})" />
           <stop offset="0.85" style="stop-color: var({color})" />
@@ -423,59 +520,58 @@
       {/each}
       <!-- An attested person's trace: no hard ends, since we don't know when they lived -->
       {#each [["tl-trace", "--people"], ["tl-trace-focus", "--accent"]] as [id, color] (id)}
-        <linearGradient {id}>
+        <linearGradient {id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" style="stop-color: var({color}); stop-opacity: 0" />
           <stop offset="0.3" style="stop-color: var({color}); stop-opacity: 0.7" />
           <stop offset="0.7" style="stop-color: var({color}); stop-opacity: 0.7" />
           <stop offset="1" style="stop-color: var({color}); stop-opacity: 0" />
         </linearGradient>
       {/each}
-      <filter id="tl-glow" x="-20%" y="-300%" width="140%" height="700%">
+      <filter id="tl-glow" x="-300%" y="-20%" width="700%" height="140%">
         <feGaussianBlur stdDeviation="3" result="blur" />
         <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
       </filter>
-      <radialGradient id="tl-vignette" cx="0.5" cy="0.45" r="0.8">
+      <radialGradient id="tl-vignette" cx="0.55" cy="0.5" r="0.8">
         <stop offset="0.55" style="stop-color: var(--edge); stop-opacity: 0" />
         <stop offset="1" style="stop-color: var(--edge)" />
       </radialGradient>
       {#each eraTitles as { p, a, b } (p.id)}
-        <clipPath id="tl-clip-{p.id}"><rect x={a} y="0" width={b - a} height={height} /></clipPath>
+        <clipPath id="tl-clip-{p.id}"><rect x="0" y={a} {width} height={b - a} /></clipPath>
       {/each}
-      <clipPath id="tl-above-axis"><rect x="0" y="0" {width} height={axisY} /></clipPath>
+      <clipPath id="tl-right-of-axis"><rect x={axisX} y="0" width={Math.max(0, width - axisX)} {height} /></clipPath>
     </defs>
 
     <!-- Eras: alternating bands, a dotted edge, and the era's name writ large -->
-    {#each eraTitles as { p, a, b, left, size }, n (p.id)}
-      <rect class="band" class:alt={periods.indexOf(p) % 2 === 1} x={a} y="0" width={b - a} {height} />
-      <line class="era-edge" x1={x(p.start)} x2={x(p.start)} y1="70" y2={height - STRIP - 10} />
-      {#if size >= 14}
+    {#each eraTitles as { p, a, b, top, lines, size } (p.id)}
+      <rect class="band" class:alt={periods.indexOf(p) % 2 === 1} x="0" y={a} {width} height={b - a} />
+      <line class="era-edge" x1={contentL - 6} x2={width - 10} y1={y(p.start)} y2={y(p.start)} />
+      {#if size >= 12}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <g class="era" onclick={() => pickPeriod(p)}>
-          <text
-            class="era-name"
-            clip-path="url(#tl-clip-{p.id})"
-            x={left - 4}
-            y={ERA_TOP + size * 0.55}
-            style="font-size: {size}px">{p.name.toUpperCase()}</text
+          <text class="era-name" clip-path="url(#tl-clip-{p.id})" x={eraRight} y={top + size * 0.8} text-anchor="end" style="font-size: {size}px"
+            >{#each lines as line, n (n)}<tspan x={eraRight} dy={n ? size * 1.05 : 0}>{line}</tspan>{/each}</text
           >
-          <text class="era-dates" x={left} y={ERA_TOP + size * 0.55 + 24}>{p.when}</text>
+          <text class="era-dates" clip-path="url(#tl-clip-{p.id})" x={eraRight} y={top + size * 0.8 + (lines.length - 1) * size * 1.05 + 22} text-anchor="end"
+            >{p.when}</text
+          >
         </g>
       {/if}
     {/each}
 
     <!-- The time axis -->
-    <line x1="0" x2={width} y1={axisY} y2={axisY} stroke="url(#tl-axis)" stroke-width="1.5" />
+    <line x1={axisX} x2={axisX} y1="0" y2={height} stroke="url(#tl-axis)" stroke-width="1.5" />
     {#each ticks as t (t)}
-      <line class="tick-mark" x1={x(t)} x2={x(t)} y1={axisY - 5} y2={axisY + 5} />
-      <text class="tick" x={x(t)} y={axisY + 22} text-anchor="middle">{tickLabel(t)}</text>
+      <line class="tick-mark" x1={axisX - 5} x2={axisX + 5} y1={y(t)} y2={y(t)} />
+      <text class="tick" class:small={narrow} x={axisX - 8} y={y(t) + 4} text-anchor="end">{tickLabel(t)}</text>
     {/each}
 
     <!-- Kingdoms: who sat on each throne, each king coloured by his house -->
     {#each trackView as { k, box, reigns, labels } (k.id)}
+      {@const cx = (box.x0 + box.x1) / 2}
       <g class="kingdom">
         {#each reigns as r (r.id)}
           {@const b = reignBox(r, box)}
-          {@const w = kingWidth(r, k)}
+          {@const ky = !r.sub && b.w > kingWidth(r, k) + 6 ? kingY(b, labels) : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <g
             class="reign tone-{r.tone}"
@@ -490,146 +586,164 @@
             onpointerenter={(e) => {
               if (e.pointerType !== "mouse") return
               const item = byId.get(r.id)
-              if (item) hovered = { item, x: e.offsetX, y: b.y + b.h, note: `${r.king} · ${r.note ?? r.house}` }
+              if (item) hovered = { item, x: b.x + b.w, y: e.offsetY, note: `${r.king} · ${r.note ?? r.house}` }
             }}
             onpointerleave={() => (hovered = undefined)}
           >
-            {#if r.sub}<rect class="hit" x={b.x0} y={b.y - 3} width={b.w} height={b.h + 6} />{/if}
-            <rect class="block" x={b.x0} y={b.y} width={b.w} height={b.h} rx={r.sub ? 1.5 : 2.5} />
-            {#if !r.sub && b.w > w + 10}
-              <text x={Math.max(b.x0 + 5, Math.min(6, b.x0 + b.w - 5 - w))} y={b.y + b.h / 2 + (tall(k) ? 5 : 4)}>{r.king}</text>
+            {#if r.sub}<rect class="hit" x={b.x - 3} y={b.y} width={b.w + 6} height={b.h} />{/if}
+            <rect class="block" x={b.x} y={b.y} width={b.w} height={b.h} rx={r.sub ? 1.5 : 2.5} />
+            {#if ky !== undefined}
+              <text x={cx} y={ky} text-anchor="middle">{r.king}</text>
             {/if}
           </g>
         {/each}
         {#each labels as l (l.text + l.start)}
           {#if l.tone === -1}
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <text
+            <g
               class="kingdom-name"
               class:dim={dimmed(k.event)}
-              x={l.x}
-              y={box.label}
               onclick={(e) => {
                 e.stopPropagation()
                 pickTrack(k.event)
-              }}>{l.text}</text
+              }}
             >
+              <text x={cx} y={l.x + 10} text-anchor="middle">{l.text}</text>
+              {#if l.sub}<text class="region" x={cx} y={l.x + 21} text-anchor="middle">{l.sub}</text>{/if}
+            </g>
           {:else}
-            <text class="house tone-{l.tone}" class:dim={!!focus} x={l.x} y={box.label}>{l.text}</text>
+            <g class="house tone-{l.tone}" class:dim={!!focus}>
+              <text class="house-of" x={cx} y={l.x + 9} text-anchor="middle">HOUSE OF</text>
+              <text x={cx} y={l.x + 21} text-anchor="middle">{l.text}</text>
+            </g>
           {/if}
         {/each}
-        {#if k.fate && x(k.end) + 8 < width}
-          <text class="fate" x={x(k.end) + 8} y={(box.y0 + box.y1) / 2 + 4}>{k.fate}</text>
+        {#if k.fate && !narrow && y(k.end) + 8 < height}
+          <text class="fate" x={cx} y={y(k.end) + 16} text-anchor="middle"
+            >{#each wrap(k.fate, box.x1 - box.x0 + 8, 6) as line, n (n)}<tspan x={cx} dy={n ? 14 : 0}>{line}</tspan>{/each}</text
+          >
         {/if}
       </g>
     {/each}
 
     <!-- Links from the selection to its connections -->
     {#if focus && anchors.has(focus.id)}
-      {@const [fx0, fx1, fy] = anchors.get(focus.id)!}
-      {@const fx = (Math.max(fx0, 0) + Math.min(fx1, width)) / 2}
+      {@const [fy0, fy1, fx] = anchors.get(focus.id)!}
+      {@const fy = (Math.max(fy0, 0) + Math.min(fy1, height)) / 2}
       {#each focus.related as id (id)}
         {#if anchors.has(id)}
-          {@const [tx0, tx1, ty] = anchors.get(id)!}
-          {@const tx = (Math.max(tx0, 0) + Math.min(tx1, tx0 + 60, width)) / 2}
+          {@const [ty0, ty1, tx] = anchors.get(id)!}
+          {@const ty = (Math.max(ty0, 0) + Math.min(ty1, ty0 + 60, height)) / 2}
+          {@const mx = (fx + tx) / 2}
           <path
             pathLength="1"
             class="link"
             class:to-event={byId.get(id)?.kind === "event"}
-            d="M{fx},{fy} C{fx},{(fy + ty) / 2} {tx},{(fy + ty) / 2} {tx},{ty}"
+            d="M{fx},{fy} C{mx},{fy} {mx},{ty} {tx},{ty}"
           />
         {/if}
       {/each}
     {/if}
 
-    <!-- Events above the axis, people below. Each item sits at its lane via a
-         CSS transform, so a lane change on zoom glides rather than jumps. Events
-         are clipped at the axis, so their stems can simply run long. -->
+    <!-- Events right of the axis, people left of it, labels reading away from
+         it. Each item sits at its lane via a CSS transform, so a lane change on
+         zoom glides rather than jumps. Events are clipped at the axis, so their
+         stems can simply run long. -->
     {#each visible as placed, section (section)}
-      <g clip-path={section === 0 ? "url(#tl-above-axis)" : undefined}>
+      <g clip-path={section === 0 ? "url(#tl-right-of-axis)" : undefined}>
         {#each placed as { item } (item.id)}
-          {@const [xs, xe, y] = anchors.get(item.id)!}
+          {@const [ys, ye, mx] = anchors.get(item.id)!}
           {@const span = item.end > item.start}
+          {@const name = nameOf(item)}
+          {@const w = nameWidth(item)}
           <!-- Pointer layer; every item also has its own page and index entry. -->
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <g
             class="item {item.kind}"
             class:dim={dimmed(item.id)}
             class:focus={item === focus}
-            style="transform: translateY({y}px)"
+            style="transform: translateX({mx}px)"
             onclick={(e) => {
               e.stopPropagation()
               selected = item
             }}
             onpointerenter={(e) => {
-              if (e.pointerType === "mouse") hovered = { item, x: e.offsetX, y }
+              if (e.pointerType === "mouse") hovered = { item, x: e.offsetX, y: e.offsetY }
             }}
             onpointerleave={() => (hovered = undefined)}
           >
             {#if item.kind === "event"}
-              <line class="stem" x1={xs} x2={xs} y1="0" y2={axisY} />
-              <rect class="hit" x={xs - 8} y="-22" width={Math.max(xe - xs, labelWidth(item.name)) + 16} height="30" />
+              <line class="stem" x1="0" x2={-width} y1={ys} y2={ys} />
+              <rect class="hit" x="-8" y={ys - 11} width={w + 24} height={Math.max(0, ye - ys) + 22} />
               {#if span}
-                <rect class="bar" x={xs} y="-2.5" width={xe - xs} height="5" rx="2.5" />
+                <rect class="bar" x="-2.5" y={ys} width="5" height={ye - ys} rx="2.5" />
               {/if}
-              <circle class="dot" cx={xs} cy="0" r={dotRadius(item)} />
-              <text class:strong={strong(item)} x={span ? labelX(item, xs, xe) : xs + dotRadius(item) + 5} y={span ? -9 : 4}
-                >{item.name}</text
-              >
+              <circle class="dot" cx="0" cy={ys} r={dotRadius(item)} />
+              <text class:strong={strong(item)} x={span ? 9 : dotRadius(item) + 5} y={(span ? labelY(ys, ye) : ys) + 4}>{name}</text>
             {:else if !item.lifetime}
               <!-- Lifespan unknown: a dot for each dated sighting on a faded trace -->
-              <rect class="hit" x={xs - FADE} y="-20" width={Math.max(xe - xs + 2 * FADE, labelWidth(item.name) + FADE)} height="30" />
+              <rect class="hit" x={-w - 16} y={ys - FADE} width={w + 24} height={ye - ys + 2 * FADE} />
               <rect
                 class="trace"
-                x={xs - FADE}
-                y="-1"
-                width={xe - xs + 2 * FADE}
-                height="2"
+                x="-1"
+                y={ys - FADE}
+                width="2"
+                height={ye - ys + 2 * FADE}
                 fill="url(#{item === focus ? 'tl-trace-focus' : 'tl-trace'})"
               />
               {#each item.marks ?? [item.start] as year (year)}
-                <circle class="sighting" cx={x(year)} cy="0" r={dotRadius(item) - 0.5} />
+                <circle class="sighting" cx="0" cy={y(year)} r={dotRadius(item) - 0.5} />
               {/each}
-              <text class:strong={strong(item)} x={labelX(item, xs, xe)} y="-9">{item.name}</text>
+              <text class:strong={strong(item)} x="-9" y={labelY(ys, ye) + 4} text-anchor="end">{name}</text>
             {:else}
               {@const h = ribbon(item)}
-              <rect class="hit" x={xs - 6} y="-20" width={Math.max(xe - xs, labelWidth(item.name)) + 12} height="30" />
+              <rect class="hit" x={-w - h / 2 - 10} y={ys - 8} width={w + h + 16} height={Math.max(0, ye - ys) + 16} />
               <rect
                 class="ribbon"
-                x={xs}
-                y={-h / 2}
-                width={Math.max(6, xe - xs)}
-                height={h}
+                x={-h / 2}
+                y={ys}
+                width={h}
+                height={Math.max(6, ye - ys)}
                 rx={h / 2}
-                style={xe - xs > 40 ? `fill: url(#${item === focus ? "tl-focus" : "tl-person"})` : ""}
+                style={ye - ys > 40 ? `fill: url(#${item === focus ? "tl-focus" : "tl-person"})` : ""}
                 filter={item === focus ? "url(#tl-glow)" : undefined}
               />
-              <text class:strong={strong(item)} x={labelX(item, xs, xe)} y={-h / 2 - 5}>{item.name}</text>
+              <text class:strong={strong(item)} x={-h / 2 - 5} y={labelY(ys, ye) + 4} text-anchor="end">{name}</text>
             {/if}
           </g>
         {/each}
       </g>
     {/each}
 
-    <!-- Overview strip: the whole story, with a window on what's in view -->
-    <g class="strip" onpointerdown={onStrip} onpointermove={onStrip} role="slider" aria-label="Overview" aria-valuenow={Math.round((x.domain()[0] + x.domain()[1]) / 2)} tabindex="-1">
-      <rect class="strip-hit" x={stripX - 8} y={stripY - 10} width={stripW + 16} height="40" />
+    <!-- Overview bar: the whole story, with a window on what's in view -->
+    <g
+      class="strip"
+      onpointerdown={onStrip}
+      onpointermove={onStrip}
+      role="scrollbar"
+      aria-controls="timeline-canvas"
+      aria-orientation="vertical"
+      aria-label="Overview"
+      aria-valuenow={Math.round((y.domain()[0] + y.domain()[1]) / 2)}
+      tabindex="-1"
+    >
+      <rect class="strip-hit" x={barX - 12} y={stripTop - 10} width="42" height={stripBottom - stripTop + 20} />
       {#each periods as p, n (p.id)}
-        <rect class="strip-era" class:alt={n % 2 === 1} x={sx(p.start)} y={stripY} width={Math.max(0, sx(p.end) - sx(p.start) - 1.5)} height="18" rx="2" />
+        <rect class="strip-era" class:alt={n % 2 === 1} x={barX} y={sy(p.start)} width="18" height={Math.max(0, sy(p.end) - sy(p.start) - 1.5)} rx="2" />
       {/each}
-      {#each density as [bx, count] (bx)}
-        <rect class="strip-bin" x={bx} y={stripY + 18 - Math.min(14, count * 1.3)} width="3" height={Math.min(14, count * 1.3)} />
+      {#each density as [by, count] (by)}
+        <rect class="strip-bin" x={barX} y={by} width={Math.min(14, count * 1.3)} height="3" />
       {/each}
       <rect
         class="strip-window"
-        x={Math.max(stripX, sx(x.domain()[0]))}
-        y={stripY - 4}
-        width={Math.max(4, Math.min(stripX + stripW, sx(x.domain()[1])) - Math.max(stripX, sx(x.domain()[0])))}
-        height="26"
+        x={barX - 4}
+        y={Math.max(stripTop, sy(y.domain()[0]))}
+        width="26"
+        height={Math.max(4, Math.min(stripBottom, sy(y.domain()[1])) - Math.max(stripTop, sy(y.domain()[0])))}
         rx="4"
       />
-      <text class="strip-label" x={stripX} y={stripY + 36}>Creation</text>
-      <text class="strip-label" x={stripX + stripW} y={stripY + 36} text-anchor="end">Early church</text>
+      <text class="strip-label" x={narrow ? 4 : barX + 9} y={stripTop - 10} text-anchor={narrow ? "start" : "middle"}>Creation</text>
+      <text class="strip-label" x={narrow ? 4 : barX + 9} y={stripBottom + 22} text-anchor={narrow ? "start" : "middle"}>Early church</text>
     </g>
 
     <rect class="vignette" {width} {height} fill="url(#tl-vignette)" />
@@ -676,7 +790,7 @@
   {/if}
 
   <div class="corner">
-    <p>Scroll to zoom · drag to move · click anyone</p>
+    <p>Scroll to move · pinch or Ctrl-scroll to zoom · click anyone</p>
   </div>
   <div class="zoom-buttons" role="group" aria-label="Zoom">
     <button type="button" class="icon-button" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.6)}>−</button>
@@ -742,6 +856,9 @@
     font-size: 11px;
     fill: var(--ink-3);
     font-variant-numeric: tabular-nums;
+  }
+  .tick.small {
+    font-size: 9.5px;
   }
 
   .item {
@@ -884,22 +1001,42 @@
     opacity: 0.3;
   }
   .kingdom-name {
+    cursor: pointer;
+  }
+  .kingdom-name text {
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.16em;
     fill: var(--ink-3);
-    cursor: pointer;
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3px;
+    stroke-linejoin: round;
   }
-  .kingdom-name:hover {
+  .kingdom-name .region {
+    font-size: 8.5px;
+    font-weight: 500;
+  }
+  .kingdom-name:hover text {
     fill: var(--accent);
   }
   .house {
-    font: italic 11.5px var(--serif);
-    fill: color-mix(in srgb, var(--tone) 65%, var(--ink));
     pointer-events: none;
   }
-  .fate {
+  .house text {
     font: italic 11.5px var(--serif);
+    fill: color-mix(in srgb, var(--tone) 65%, var(--ink));
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+  .house .house-of {
+    font: 600 7.5px var(--sans);
+    letter-spacing: 0.16em;
+  }
+  .fate {
+    font: italic 11px var(--serif);
     fill: var(--ink-3);
     pointer-events: none;
   }
@@ -909,6 +1046,7 @@
 
   .strip {
     cursor: pointer;
+    outline: none;
   }
   .strip-hit {
     fill: transparent;
@@ -1017,18 +1155,22 @@
     font-size: 0.85rem;
   }
 
+  /* Bottom right, above the zoom buttons: the overview bar has the left edge. */
   .corner {
     position: absolute;
-    left: max(1.5rem, env(safe-area-inset-left));
-    bottom: max(1.4rem, env(safe-area-inset-bottom));
+    right: max(1.5rem, env(safe-area-inset-right));
+    bottom: calc(max(1.6rem, env(safe-area-inset-bottom)) + 2.9rem);
+    max-width: 13rem;
+    text-align: right;
     font-size: 0.75rem;
     color: var(--ink-3);
+    pointer-events: none;
   }
   .corner p {
     margin: 0;
   }
 
-  /* Phones: the card becomes a bottom sheet; the corner hint gives way to the strip. */
+  /* Phones: the card becomes a bottom sheet; the corner hint gives way to the lanes. */
   @media (max-width: 700px) {
     .card {
       left: 0.75rem !important;

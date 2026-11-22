@@ -12,8 +12,8 @@ const FRICTION = 0.95 // share of velocity kept per 16 ms frame
 const MIN_SPEED = 0.03 // px/ms: slower than this, stop (or don't start)
 
 // Attach to a zoom behavior already called on `element`. `axes: "x"` keeps the
-// glide horizontal (the timeline); "xy" glides freely (the map).
-export function addInertia<E extends Element>(behavior: ZoomBehavior<E, unknown>, element: E, axes: "x" | "xy") {
+// glide horizontal, "y" vertical (the timeline); "xy" glides freely (the map).
+export function addInertia<E extends Element>(behavior: ZoomBehavior<E, unknown>, element: E, axes: "x" | "y" | "xy") {
   if (reducedMotion()) return
   let samples: { t: number; x: number; y: number; k: number }[] = []
   let frame = 0
@@ -39,7 +39,7 @@ export function addInertia<E extends Element>(behavior: ZoomBehavior<E, unknown>
       // A zoom gesture, or a finger that stopped before lifting: no glide.
       if (first.k !== last.k || performance.now() - last.t > 50) return
       const dt = Math.max(1, last.t - first.t)
-      let vx = (last.x - first.x) / dt
+      let vx = axes === "y" ? 0 : (last.x - first.x) / dt
       let vy = axes === "x" ? 0 : (last.y - first.y) / dt
       let then = performance.now()
 
