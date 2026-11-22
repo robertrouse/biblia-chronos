@@ -75,19 +75,28 @@
   // scroll through centuries of nothing to reach the start.
   const PAD = $derived(narrow ? 32 : 64)
 
+  // Each era has its own hue, worn by its segment on the era bar, its band
+  // and big name in the timeline, and its stretch of the overview bar. Picked
+  // so neighbours differ; more eras than hues just cycle round.
+  const ERA_HUES = [32, 205, 48, 14, 38, 95, 268, 338, 218, 172, 58, 2, 142]
+  const hue = (p: TimelinePeriod) => ERA_HUES[periods.indexOf(p) % ERA_HUES.length]
+
   // The era bar, along the top under the site bar: every era as long as it
-  // lasted, named in full beneath. A name sits under the middle of its era if
-  // it can, slides along a little if that clears its neighbour, and otherwise
-  // steps down a row; a hairline ties any name that moved to its era. Time
-  // starts below the bar.
-  const ERA_BAR_Y = 64
-  const ERA_SEG_H = 8
+  // lasted, named in full, the names alternating above and below the bar. A
+  // name sits by the middle of its era if it can, slides along a little if
+  // that clears its neighbour, and otherwise steps a row further out; a
+  // hairline ties any name that moved to its era. Time starts below the bar.
+  const ERA_TOP = 62 // under the site bar
+  const ERA_SEG_H = 10
   const ERA_ROW = 14
   const eraCharW = $derived(narrow ? 5.6 : 6.2) // rough width of a letter in its labels
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
-  const eraTabs = $derived.by(() => {
-    const rows: number[] = [] // where the last name in each row ends
-    return periods.map((p) => {
+  const eraPlaced = $derived.by(() => {
+    // Per side, where the last name in each row ends
+    const rows = { above: [] as number[], below: [] as number[] }
+    return periods.map((p, n) => {
+      const side: "above" | "below" = n % 2 === 0 ? "above" : "below"
+      const ends = rows[side]
       const a = eraX(p.start)
       const b = eraX(p.end)
       const mid = (a + b) / 2
@@ -95,18 +104,28 @@
       const ideal = Math.max(16 + w / 2, Math.min(width - 16 - w / 2, mid))
       const slack = Math.max(40, w * 0.6) // how far it may slide from its era
       const at = (end: number) => Math.max(ideal, end + 12 + w / 2)
-      let row = rows.findIndex((end) => at(end) - ideal <= slack && at(end) + w / 2 <= width - 16)
-      if (row === -1) row = rows.push(-Infinity) - 1
-      const cx = at(rows[row])
-      rows[row] = cx + w / 2
+      let row = ends.findIndex((end) => at(end) - ideal <= slack && at(end) + w / 2 <= width - 16)
+      if (row === -1) row = ends.push(-Infinity) - 1
+      const cx = at(ends[row])
+      ends[row] = cx + w / 2
       // Where its hairline meets it: the point of the name nearest its era.
       const lx = Math.max(cx - w / 2 + 4, Math.min(cx + w / 2 - 4, mid))
       const moved = row > 0 || cx - w / 2 > b || cx + w / 2 < a
-      return { p, a, b, mid, cx, w, row, lx, moved, y: ERA_BAR_Y + ERA_SEG_H + 14 + row * ERA_ROW }
+      return { p, a, b, mid, cx, w, lx, moved, side, row }
     })
   })
-  const eraRows = $derived(Math.max(1, ...eraTabs.map((t) => t.row + 1)))
-  const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + eraRows * ERA_ROW + 12)
+  const rowsOn = (side: "above" | "below") =>
+    Math.max(0, ...eraPlaced.filter((t) => t.side === side).map((t) => t.row + 1))
+  const ERA_BAR_Y = $derived(ERA_TOP + rowsOn("above") * ERA_ROW + 4)
+  // Each name's baseline, and where its hairline leaves the bar and meets it.
+  const eraTabs = $derived(
+    eraPlaced.map((t) =>
+      t.side === "above"
+        ? { ...t, y: ERA_BAR_Y - 5 - t.row * ERA_ROW, from: ERA_BAR_Y, to: ERA_BAR_Y - 2 - t.row * ERA_ROW }
+        : { ...t, y: ERA_BAR_Y + ERA_SEG_H + 14 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: ERA_BAR_Y + ERA_SEG_H + 4 + t.row * ERA_ROW },
+    ),
+  )
+  const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + rowsOn("below") * ERA_ROW + 12)
   const CARD_TOP = $derived(TOP + 8)
   // What's in view, marked on the era bar.
   const eraWindow = $derived.by(() => {
@@ -598,11 +617,11 @@
 
     <!-- Eras: alternating bands, a dotted edge, and the era's name writ large -->
     {#each eraTitles as { p, a, b, top, lines, size } (p.id)}
-      <rect class="band" class:alt={periods.indexOf(p) % 2 === 1} x="0" y={a} {width} height={b - a} />
+      <rect class="band" class:alt={periods.indexOf(p) % 2 === 1} style="--hue: {hue(p)}" x="0" y={a} {width} height={b - a} />
       <line class="era-edge" x1="10" x2={contentR + 6} y1={y(p.start)} y2={y(p.start)} />
       {#if size >= 12}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <g class="era" onclick={() => pickPeriod(p)}>
+        <g class="era" style="--hue: {hue(p)}" onclick={() => pickPeriod(p)}>
           <text class="era-name" clip-path="url(#tl-clip-{p.id})" x={eraLeft} y={top + size * 0.8} style="font-size: {size}px"
             >{#each lines as line, n (n)}<tspan x={eraLeft} dy={n ? size * 1.05 : 0}>{line}</tspan>{/each}</text
           >
@@ -783,8 +802,8 @@
       tabindex="-1"
     >
       <rect class="strip-hit" x={barX - 12} y={stripTop - 10} width="42" height={stripBottom - stripTop + 20} />
-      {#each periods as p, n (p.id)}
-        <rect class="strip-era" class:alt={n % 2 === 1} x={barX} y={sy(p.start)} width="18" height={Math.max(0, sy(p.end) - sy(p.start) - 1.5)} rx="2" />
+      {#each periods as p (p.id)}
+        <rect class="strip-era" style="--hue: {hue(p)}" x={barX} y={sy(p.start)} width="18" height={Math.max(0, sy(p.end) - sy(p.start) - 1.5)} rx="2" />
       {/each}
       {#each density as [by, count] (by)}
         <rect class="strip-bin" x={barX} y={by} width={Math.min(14, count * 1.3)} height="3" />
@@ -807,11 +826,12 @@
          see all of it. The window marks what's in view. -->
     <g class="eras">
       <rect class="eras-back" x="0" y="0" {width} height={TOP - 6} />
-      {#each eraTabs as { p, a, b, mid, cx, w, lx, moved, y: ly }, n (p.id)}
+      {#each eraTabs as { p, a, b, mid, cx, w, lx, moved, y: ly, from, to } (p.id)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <g
           class="era-tab"
           class:on={selected === p}
+          style="--hue: {hue(p)}"
           role="button"
           tabindex="0"
           aria-label="Show {p.name}, {p.when}"
@@ -823,9 +843,9 @@
           }}
         >
           <title>{p.name} · {p.when}</title>
-          <rect class="era-seg" class:alt={n % 2 === 1} x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
+          <rect class="era-seg" x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
           <rect class="hit" x={a} y={ERA_BAR_Y - 4} width={Math.max(4, b - a)} height={ERA_SEG_H + 8} />
-          {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={ERA_BAR_Y + ERA_SEG_H} y2={ly - 10} />{/if}
+          {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={from} y2={to} />{/if}
           <rect class="hit" x={cx - w / 2 - 4} y={ly - 11} width={w + 8} height={ERA_ROW} />
           <text class:small={narrow} x={cx} y={ly} text-anchor="middle">{p.name}</text>
         </g>
@@ -903,11 +923,13 @@
     cursor: grabbing;
   }
 
+  /* Eras wear their hue (--hue, set per era) faintly in the timeline and
+     fully on the era bar. */
   .band {
-    fill: transparent;
+    fill: hsl(var(--hue) 55% 50% / 0.05);
   }
   .band.alt {
-    fill: var(--band);
+    fill: hsl(var(--hue) 55% 50% / 0.08);
   }
   .era-edge {
     stroke: var(--gold);
@@ -921,7 +943,7 @@
     font-family: var(--serif);
     font-weight: 600;
     letter-spacing: 0.1em;
-    fill: var(--title);
+    fill: hsl(var(--hue) 45% 38% / 0.2);
     transition: fill 0.2s;
   }
   .era:hover .era-name {
@@ -1137,11 +1159,8 @@
     fill: transparent;
   }
   .strip-era {
-    fill: var(--band);
+    fill: hsl(var(--hue) 45% 64% / 0.6);
     stroke: var(--rule);
-  }
-  .strip-era.alt {
-    fill: var(--rule);
   }
   .strip-bin {
     fill: var(--events);
@@ -1171,19 +1190,16 @@
     outline: none;
   }
   .era-seg {
-    fill: var(--band);
-    stroke: var(--rule);
+    fill: hsl(var(--hue) 45% 66%);
+    stroke: hsl(var(--hue) 35% 45% / 0.35);
     transition: fill 0.15s;
-  }
-  .era-seg.alt {
-    fill: var(--rule);
   }
   .era-lead {
     stroke: var(--rule);
   }
   .era-tab text {
     font-size: 11px;
-    fill: var(--ink-2);
+    fill: hsl(var(--hue) 40% 30%);
     paint-order: stroke;
     stroke: var(--paper);
     stroke-width: 3px;
@@ -1196,7 +1212,7 @@
   .era-tab:hover .era-seg,
   .era-tab:focus-visible .era-seg,
   .era-tab.on .era-seg {
-    fill: color-mix(in srgb, var(--gold) 45%, transparent);
+    fill: hsl(var(--hue) 55% 50%);
   }
   .era-tab:hover text,
   .era-tab:focus-visible text,
@@ -1206,6 +1222,34 @@
   .era-tab:hover .era-lead,
   .era-tab.on .era-lead {
     stroke: var(--gold);
+  }
+  /* Dark theme: the same hues, deeper and softer */
+  :global([data-theme="dark"]) .band {
+    fill: hsl(var(--hue) 50% 65% / 0.04);
+  }
+  :global([data-theme="dark"]) .band.alt {
+    fill: hsl(var(--hue) 50% 65% / 0.07);
+  }
+  :global([data-theme="dark"]) .era-name {
+    fill: hsl(var(--hue) 40% 75% / 0.13);
+  }
+  :global([data-theme="dark"]) .strip-era {
+    fill: hsl(var(--hue) 35% 42% / 0.7);
+  }
+  :global([data-theme="dark"]) .era-seg {
+    fill: hsl(var(--hue) 32% 40%);
+    stroke: hsl(var(--hue) 30% 60% / 0.3);
+  }
+  :global([data-theme="dark"]) .era-tab text {
+    fill: hsl(var(--hue) 40% 78%);
+  }
+  :global([data-theme="dark"]) .era-tab:hover text,
+  :global([data-theme="dark"]) .era-tab.on text {
+    fill: var(--accent);
+  }
+  :global([data-theme="dark"]) .era-tab:hover .era-seg,
+  :global([data-theme="dark"]) .era-tab.on .era-seg {
+    fill: hsl(var(--hue) 45% 52%);
   }
   .eras-window {
     fill: none;
