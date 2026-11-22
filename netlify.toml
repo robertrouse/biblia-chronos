@@ -1,0 +1,7 @@
+# Netlify: the same static build as GitHub Pages, served from dist/.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
