@@ -1,18 +1,18 @@
 <script lang="ts">
   // The timeline, Creation to the early church, full screen and running top to
-  // bottom. Era names sit large down the left edge; events branch off to the
-  // right of a gold time axis and people's lives run down its left. Click anyone
-  // to light up their connections. An overview scrollbar down the right edge
-  // shows where you are in the whole story. Just left of the axis, the kingdoms
-  // track shows who sat on each throne: the united monarchy forking into Israel
-  // and Judah, each king coloured by his ruling house.
+  // bottom. Era names sit large down the left edge, then the gold time axis
+  // with its years; events branch off to its right, then the kingdoms track
+  // shows who sat on each throne (the united monarchy forking into Israel and
+  // Judah, each king coloured by his ruling house), then people's lives run
+  // down beside it. Click anyone to light up their connections. An overview
+  // scrollbar down the right edge shows where you are in the whole story.
   //
   // It is the horizontal timeline turned a quarter turn clockwise, with every
   // label kept upright. Labels now run across the time axis instead of along
   // it, so lanes are narrow columns and a label takes as many of them as it is
-  // wide (packLanes' lanesFor). On both sides lanes run left to right and fill
-  // in order of time, so the story reads across as well as down: Adam, then Eve
-  // to his right, then Cain and Abel. Labels read away from the axis.
+  // wide (packLanes' lanesFor). Lanes run left to right and fill in order of
+  // time, so the story reads across as well as down: Adam, then Eve to his
+  // right, then Cain and Abel. Every label sits to the right of its mark.
   //
   // d3-scale does the math, d3-zoom handles drag/pinch (d3-transition animates
   // jumps), the wheel scrolls, Svelte renders the SVG. Lanes are re-packed on
@@ -66,13 +66,18 @@
   let svg: SVGSVGElement
   let behavior: ZoomBehavior<SVGSVGElement, unknown>
 
-  // Columns, left to right: the era names, people lanes, the kingdoms track, tick labels, the axis, event lanes,
-  // and the overview bar.
+  // Columns, left to right: the era names, tick labels, the axis, event lanes,
+  // the kingdoms track, people lanes, and the overview bar.
   // On a phone every pixel across counts: the kingdoms track slims to bare
-  // blocks (tap one for its king) and people get a smaller share.
+  // blocks (tap one for its king) and events get the larger share.
   const narrow = $derived(width < 700)
+  // Breathing room before Creation and after the early church: fully zoomed
+  // out, or scrolled to either end, time stops this far short of the edge. A
+  // fixed distance on screen rather than extra years, so zoomed in you don't
+  // scroll through centuries of nothing to reach the start.
+  const PAD = $derived(narrow ? 32 : 64)
   const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
-  const TRACK_GAP = $derived(narrow ? 8 : 14) // kingdoms track to the first people lane
+  const TRACK_GAP = $derived(narrow ? 8 : 14) // either side of the kingdoms track
   const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
   const contentL = $derived(eraW + 8)
   const barX = $derived(width - (narrow ? 12 : 26) - 18) // the overview bar
@@ -81,21 +86,21 @@
   const trackCol = $derived(!kingdoms.kingdoms.length ? 0 : narrow ? 18 : width < 1100 ? 66 : 86)
   const colGap = $derived(narrow ? 5 : 12) // between track columns
   const trackW = $derived(kingdoms.rows * trackCol)
-  const free = $derived(Math.max(120, contentR - contentL - tickW - trackW - TRACK_GAP - AXIS_GAP))
-  const peopleR = $derived(contentL + Math.round(free * (narrow ? 0.4 : 0.55))) // right edge of the people lanes
-  const trackR = $derived(peopleR + TRACK_GAP + trackW)
-  const axisX = $derived(trackR + tickW)
+  const free = $derived(Math.max(120, contentR - contentL - tickW - AXIS_GAP - trackW - 2 * TRACK_GAP))
+  const axisX = $derived(contentL + tickW)
   const eventsL = $derived(axisX + AXIS_GAP)
-  const eventLanes = $derived(Math.max(1, Math.floor((contentR - eventsL) / COL)))
-  const peopleLanes = $derived(Math.max(1, Math.floor((peopleR - contentL) / COL)))
-  // Where a lane's mark sits: the column of the item's nearest the axis, with
-  // its label on the far side.
+  const eventsR = $derived(eventsL + Math.round(free * (narrow ? 0.6 : 0.45))) // right edge of the event lanes
+  const trackL = $derived(eventsR + TRACK_GAP)
+  const peopleL = $derived(trackL + trackW + TRACK_GAP)
+  const eventLanes = $derived(Math.max(1, Math.floor((eventsR - eventsL) / COL)))
+  const peopleLanes = $derived(Math.max(1, Math.floor((contentR - peopleL) / COL)))
+  // Where a lane's mark sits: the item's first column, its label to the right.
   const eventX = (lane: number) => eventsL + lane * COL + COL / 2
-  const personX = (lane: number) => contentL + lane * COL + COL / 2
+  const personX = (lane: number) => peopleL + lane * COL + COL / 2
 
-  const base = $derived(scaleLinear().domain(domain).range([TOP, height - BOTTOM]))
+  const base = $derived(scaleLinear().domain(domain).range([TOP + PAD, height - BOTTOM - PAD]))
   const y = $derived(transform.rescaleY(base))
-  const ticks = $derived(y.ticks(Math.max(2, Math.floor((height - TOP) / 80))).filter(Number.isInteger))
+  const ticks = $derived(y.ticks(Math.max(2, Math.floor((height - TOP) / 80))).filter((t) => Number.isInteger(t) && t >= domain[0] && t <= domain[1]))
 
   const isItem = (s: TimelineItem | TimelinePeriod | undefined): s is TimelineItem => !!s && "kind" in s
   const focus = $derived(isItem(selected) ? selected : undefined)
@@ -125,7 +130,7 @@
   // with no pan applied, not just what's in view. Dragging only pans, so
   // nothing changes lane mid-drag; lanes change only when the zoom does.
   const k = $derived(transform.k)
-  const world = $derived(scaleLinear().domain(domain).range([TOP * k, (height - BOTTOM) * k]))
+  const world = $derived(scaleLinear().domain(domain).range([(TOP + PAD) * k, (height - BOTTOM - PAD) * k]))
   // An item's footprint along time: its mark, padded, with room at its start
   // for the label. Attested people's traces fade out past their first and
   // last sighting.
@@ -163,7 +168,7 @@
   // kingdom split. The gap on the far side holds co-regents' stripes.
   function rowBox(k: KingdomRow) {
     const [first, last] = k.row === "all" ? [0, kingdoms.rows - 1] : [k.row, k.row]
-    return { x0: trackR - (last + 1) * trackCol + colGap, x1: trackR - first * trackCol }
+    return { x0: trackL + first * trackCol, x1: trackL + (last + 1) * trackCol - colGap }
   }
   // Labels sit at the top of what they name, two lines each: a kingdom and its
   // region, or a house ("House of" / "Omri"). They stick to the top of the view
@@ -196,7 +201,7 @@
   function reignBox(r: Reign, box: ReturnType<typeof rowBox>) {
     if (r.sub) {
       const y0 = y(r.start)
-      return { x: box.x0 - Math.min(5, colGap - 1) - (r.sub - 1) * 4, w: 3, y: y0, h: Math.max(3, y(r.end) - y0) }
+      return { x: box.x1 + Math.min(5, colGap - 1) - 3 + (r.sub - 1) * 4, w: 3, y: y0, h: Math.max(3, y(r.end) - y0) }
     }
     const y0 = y(r.start) + (r.opens ? 1.5 : 0.5)
     const y1 = y(r.end) - (r.closes ? 1.5 : 0.5)
@@ -260,11 +265,9 @@
       ...visible.flatMap((placed) =>
         placed.map(({ item, lane }) => {
           const event = item.kind === "event"
-          const n = lanesFor(item)
-          const mx = event ? eventX(lane) : personX(lane + n - 1)
-          const w = n * COL
-          const [l, r] = event ? [mx - COL / 2, mx - COL / 2 + w] : [mx + COL / 2 - w, mx + COL / 2]
-          return [item.id, [y(item.start), y(item.end), mx, l, r] as const] as const
+          const mx = event ? eventX(lane) : personX(lane)
+          const l = mx - COL / 2
+          return [item.id, [y(item.start), y(item.end), mx, l, l + lanesFor(item) * COL] as const] as const
         }),
       ),
       ...trackView.flatMap(({ box, reigns }) =>
@@ -340,13 +343,19 @@
 
   // --- Zoom and navigation ----------------------------------------------------
 
-  // The zoom works on the stretch of the window time runs through.
+  // The zoom works on the stretch of the window time runs through (for where
+  // buttons and keys zoom around).
   function bound() {
-    const box: [[number, number], [number, number]] = [
+    behavior?.extent([
       [0, TOP],
       [width, height - BOTTOM],
-    ]
-    behavior?.extent(box).translateExtent(box)
+    ])
+  }
+  // Time never scrolls further than PAD past either end, and never sideways.
+  function constrain(t: ZoomTransform) {
+    const [first, last] = [t.applyY(base(domain[0])), t.applyY(base(domain[1]))]
+    const shift = first > TOP + PAD ? TOP + PAD - first : last < height - BOTTOM - PAD ? height - BOTTOM - PAD - last : 0
+    return zoomIdentity.translate(0, t.y + shift).scale(t.k)
   }
 
   onMount(() => {
@@ -357,6 +366,7 @@
 
     behavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([1, 800])
+      .constrain(constrain)
       // The wheel scrolls (below); a pinch, or Ctrl/⌘ and the wheel, zooms. The
       // overview bar handles its own drags.
       .filter(
@@ -646,8 +656,8 @@
       {/each}
     {/if}
 
-    <!-- Events right of the axis, people left of it, labels reading away from
-         it. Each item sits at its lane via a CSS transform, so a lane change on
+    <!-- Events right of the axis, people right of the kingdoms track, labels to
+         the right of their marks. Each item sits at its lane via a CSS transform, so a lane change on
          zoom glides rather than jumps. Events are clipped at the axis, so their
          stems can simply run long. -->
     {#each visible as placed, section (section)}
@@ -683,7 +693,7 @@
               <text class:strong={strong(item)} x={span ? 9 : dotRadius(item) + 5} y={(span ? labelY(ys, ye) : ys) + 4}>{name}</text>
             {:else if !item.lifetime}
               <!-- Lifespan unknown: a dot for each dated sighting on a faded trace -->
-              <rect class="hit" x={-w - 16} y={ys - FADE} width={w + 24} height={ye - ys + 2 * FADE} />
+              <rect class="hit" x="-8" y={ys - FADE} width={w + 24} height={ye - ys + 2 * FADE} />
               <rect
                 class="trace"
                 x="-1"
@@ -695,10 +705,10 @@
               {#each item.marks ?? [item.start] as year (year)}
                 <circle class="sighting" cx="0" cy={y(year)} r={dotRadius(item) - 0.5} />
               {/each}
-              <text class:strong={strong(item)} x="-9" y={labelY(ys, ye) + 4} text-anchor="end">{name}</text>
+              <text class:strong={strong(item)} x="9" y={labelY(ys, ye) + 4}>{name}</text>
             {:else}
               {@const h = ribbon(item)}
-              <rect class="hit" x={-w - h / 2 - 10} y={ys - 8} width={w + h + 16} height={Math.max(0, ye - ys) + 16} />
+              <rect class="hit" x={-h / 2 - 6} y={ys - 8} width={w + h + 16} height={Math.max(0, ye - ys) + 16} />
               <rect
                 class="ribbon"
                 x={-h / 2}
@@ -709,7 +719,7 @@
                 style={ye - ys > 40 ? `fill: url(#${item === focus ? "tl-focus" : "tl-person"})` : ""}
                 filter={item === focus ? "url(#tl-glow)" : undefined}
               />
-              <text class:strong={strong(item)} x={-h / 2 - 5} y={labelY(ys, ye) + 4} text-anchor="end">{name}</text>
+              <text class:strong={strong(item)} x={h / 2 + 5} y={labelY(ys, ye) + 4}>{name}</text>
             {/if}
           </g>
         {/each}
