@@ -93,9 +93,12 @@
   // hairline ties any name that moved to its era. Time starts below the bar.
   const ERA_TOP = 62 // under the site bar
   const ERA_SEG_H = 20 // tall enough to hold its years
-  const ERA_LINE = $derived(narrow ? 12.5 : 14) // a line of an era name
+  const ERA_LINE = 17 // a line of an era name
   const ERA_GAP = 3 // bar to the nearest names, and between rows of names
-  const eraCharW = $derived(narrow ? 4.3 : 4.8) // width of a letter in its labels (PT Sans Narrow, measured)
+  const eraCharW = 5.9 // width of a letter in its names (16px PT Sans Narrow, measured)
+  // On a phone the bar is colours alone (tap one for its era): its names would
+  // stack too deep to leave room for the timeline.
+  const eraNames = $derived(!narrow)
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
   // An era's name as one line, or two if one would overrun its segment and
   // two (split where the longer line is shortest) fit it better.
@@ -142,7 +145,7 @@
   // each as tall as its tallest name.
   const rowOffsets = (side: "above" | "below") => {
     const heights: number[] = []
-    for (const t of eraPlaced.filter((t) => t.side === side))
+    for (const t of eraNames ? eraPlaced.filter((t) => t.side === side) : [])
       heights[t.row] = Math.max(heights[t.row] ?? 0, t.lines.length * ERA_LINE)
     const offsets = [ERA_GAP]
     for (const h of heights) offsets.push(offsets.at(-1)! + (h ?? 0) + ERA_GAP)
@@ -184,10 +187,10 @@
       const h = t.lines.length * ERA_LINE
       if (t.side === "above") {
         const bottom = ERA_BAR_Y - above[t.row]
-        return { ...t, top: bottom - h, h, y: bottom - h + 11, from: ERA_BAR_Y, to: bottom }
+        return { ...t, top: bottom - h, h, y: bottom - h + 13.5, from: ERA_BAR_Y, to: bottom }
       }
       const top = ERA_BAR_Y + ERA_SEG_H + below[t.row]
-      return { ...t, top, h, y: top + 11, from: ERA_BAR_Y + ERA_SEG_H, to: top }
+      return { ...t, top, h, y: top + 13.5, from: ERA_BAR_Y + ERA_SEG_H, to: top }
     }),
   )
   const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + below.at(-1)! + 10)
@@ -937,11 +940,13 @@
           <title>{p.name} · {p.when}</title>
           <rect class="era-seg" x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
           <rect class="hit" x={a} y={ERA_BAR_Y - 4} width={Math.max(4, b - a)} height={ERA_SEG_H + 8} />
-          {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={from} y2={to} />{/if}
-          <rect class="hit" x={cx - w / 2 - 4} y={ty} width={w + 8} height={h} />
-          <text class:small={narrow} x={cx} y={ly} text-anchor="middle"
-            >{#each lines as line, n (n)}<tspan x={cx} dy={n ? ERA_LINE : 0}>{line}</tspan>{/each}</text
-          >
+          {#if eraNames}
+            {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={from} y2={to} />{/if}
+            <rect class="hit" x={cx - w / 2 - 4} y={ty} width={w + 8} height={h} />
+            <text x={cx} y={ly} text-anchor="middle"
+              >{#each lines as line, n (n)}<tspan x={cx} dy={n ? ERA_LINE : 0}>{line}</tspan>{/each}</text
+            >
+          {/if}
         </g>
       {/each}
       {#each eraYears as l (l.year)}
@@ -1309,16 +1314,13 @@
   }
   .era-tab text {
     font-family: "PT Sans Narrow", var(--sans);
-    font-size: 13px;
+    font-size: 16px;
     fill: hsl(var(--hue) 40% 30%);
     paint-order: stroke;
     stroke: var(--paper);
     stroke-width: 3px;
     stroke-linejoin: round;
     transition: fill 0.15s;
-  }
-  .era-tab text.small {
-    font-size: 11.5px;
   }
   .era-tab:hover .era-seg,
   .era-tab:focus-visible .era-seg,
