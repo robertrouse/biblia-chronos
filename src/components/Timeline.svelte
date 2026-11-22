@@ -35,14 +35,12 @@
   let { items, periods, kingdoms }: { items: TimelineItem[]; periods: TimelinePeriod[]; kingdoms: KingdomTrack } =
     $props()
 
-  // Layout, in px. Time runs down from TOP (under the site bar) to BOTTOM;
-  // horizontal positions follow the window width.
-  const TOP = 76
+  // Layout, in px. Time runs down from TOP (under the site bar and the era
+  // bar) to BOTTOM; horizontal positions follow the window width.
   const BOTTOM = 28
   const COL = 8 // one lane; a label takes as many as it is wide
   const LABEL_H = 16 // a label's height, along the time axis
   const CARD_W = 340
-  const CARD_TOP = 84 // below the site bar
 
   const domain = $derived([periods[0].start, periods[periods.length - 1].end])
   // A first visit opens on Abraham onward, where most of the story is; the
@@ -76,6 +74,46 @@
   // fixed distance on screen rather than extra years, so zoomed in you don't
   // scroll through centuries of nothing to reach the start.
   const PAD = $derived(narrow ? 32 : 64)
+
+  // The era bar, along the top under the site bar: every era as long as it
+  // lasted, named in full beneath. A name sits under the middle of its era if
+  // it can, slides along a little if that clears its neighbour, and otherwise
+  // steps down a row; a hairline ties any name that moved to its era. Time
+  // starts below the bar.
+  const ERA_BAR_Y = 64
+  const ERA_SEG_H = 8
+  const ERA_ROW = 14
+  const eraCharW = $derived(narrow ? 5.6 : 6.2) // rough width of a letter in its labels
+  const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
+  const eraTabs = $derived.by(() => {
+    const rows: number[] = [] // where the last name in each row ends
+    return periods.map((p) => {
+      const a = eraX(p.start)
+      const b = eraX(p.end)
+      const mid = (a + b) / 2
+      const w = p.name.length * eraCharW
+      const ideal = Math.max(16 + w / 2, Math.min(width - 16 - w / 2, mid))
+      const slack = Math.max(40, w * 0.6) // how far it may slide from its era
+      const at = (end: number) => Math.max(ideal, end + 12 + w / 2)
+      let row = rows.findIndex((end) => at(end) - ideal <= slack && at(end) + w / 2 <= width - 16)
+      if (row === -1) row = rows.push(-Infinity) - 1
+      const cx = at(rows[row])
+      rows[row] = cx + w / 2
+      // Where its hairline meets it: the point of the name nearest its era.
+      const lx = Math.max(cx - w / 2 + 4, Math.min(cx + w / 2 - 4, mid))
+      const moved = row > 0 || cx - w / 2 > b || cx + w / 2 < a
+      return { p, a, b, mid, cx, w, row, lx, moved, y: ERA_BAR_Y + ERA_SEG_H + 14 + row * ERA_ROW }
+    })
+  })
+  const eraRows = $derived(Math.max(1, ...eraTabs.map((t) => t.row + 1)))
+  const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + eraRows * ERA_ROW + 12)
+  const CARD_TOP = $derived(TOP + 8)
+  // What's in view, marked on the era bar.
+  const eraWindow = $derived.by(() => {
+    const [v0, v1] = y.domain()
+    const x = Math.max(16, eraX(v0))
+    return { x, w: Math.max(3, Math.min(width - 16, eraX(v1)) - x) }
+  })
   const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
   const TRACK_GAP = $derived(narrow ? 8 : 14) // either side of the kingdoms track
   const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
@@ -372,7 +410,7 @@
       .filter(
         (e) =>
           !e.button &&
-          !(e.target as Element).closest?.(".strip") &&
+          !(e.target as Element).closest?.(".strip, .eras") &&
           (e.type !== "wheel" || e.ctrlKey || e.metaKey),
       )
       .on("zoom", (e) => {
@@ -404,7 +442,7 @@
       behavior.transform(select(svg), span(saved.span[0], saved.span[1]))
       selected = saved.selected ? lookup(saved.selected) : undefined
     } else behavior.transform(select(svg), span(opening, domain[1]))
-    const forget = view.onLeave(() => ({ span: y.domain(), selected: selected?.id }))
+    const forget = view.onLeave(() => ({ span: shown(), selected: selected?.id }))
     // Show it once that view is drawn (two frames: past this update and its
     // layout), so nothing slides or fades into place on the way in.
     let frame = requestAnimationFrame(() => (frame = requestAnimationFrame(() => (ready = true))))
@@ -435,13 +473,19 @@
   })
 
   // The view that shows exactly [start, end].
+  // It fills the stretch between the PAD margins, the same breathing room the
+  // ends of time get.
   function span(start: number, end: number) {
-    const k = (height - BOTTOM - TOP) / (base(end) - base(start))
-    return zoomIdentity.translate(0, TOP - k * base(start)).scale(k)
+    const [top, bottom] = [TOP + PAD, height - BOTTOM - PAD]
+    const k = (bottom - top) / (base(end) - base(start))
+    return zoomIdentity.translate(0, top - k * base(start)).scale(k)
   }
-  // Glide to show [start, end] with some room around it (or jump there).
-  function flyTo(start: number, end: number, glide = true) {
-    const pad = Math.max(8, (end - start) * 0.08)
+  // The years span() was given for the current view, to save and restore it.
+  const shown = () => [y.invert(TOP + PAD), y.invert(height - BOTTOM - PAD)]
+  // Glide to show [start, end], with some room around it unless `room` is 0
+  // (or jump there).
+  function flyTo(start: number, end: number, glide = true, room = 0.08) {
+    const pad = room ? Math.max(8, (end - start) * room) : 0
     const view = span(start - pad, end + pad)
     if (glide) select(svg).transition().duration(ms(750)).call(behavior.transform, view)
     else behavior.transform(select(svg), view)
@@ -449,7 +493,7 @@
   const zoomBy = (factor: number) => select(svg).transition().duration(ms(250)).call(behavior.scaleBy, factor)
 
   function pickPeriod(p: TimelinePeriod, glide = true) {
-    flyTo(p.start, p.end, glide)
+    flyTo(p.start, p.end, glide, 0) // an era fills the view, start to end
     selected = p
   }
 
@@ -758,6 +802,36 @@
     </g>
 
     <rect class="vignette" {width} {height} fill="url(#tl-vignette)" />
+
+    <!-- Era bar: every era along the top, as long as it lasted; click one to
+         see all of it. The window marks what's in view. -->
+    <g class="eras">
+      <rect class="eras-back" x="0" y="0" {width} height={TOP - 6} />
+      {#each eraTabs as { p, a, b, mid, cx, w, lx, moved, y: ly }, n (p.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <g
+          class="era-tab"
+          class:on={selected === p}
+          role="button"
+          tabindex="0"
+          aria-label="Show {p.name}, {p.when}"
+          onclick={() => pickPeriod(p)}
+          onkeydown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return
+            e.preventDefault()
+            pickPeriod(p)
+          }}
+        >
+          <title>{p.name} · {p.when}</title>
+          <rect class="era-seg" class:alt={n % 2 === 1} x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
+          <rect class="hit" x={a} y={ERA_BAR_Y - 4} width={Math.max(4, b - a)} height={ERA_SEG_H + 8} />
+          {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={ERA_BAR_Y + ERA_SEG_H} y2={ly - 10} />{/if}
+          <rect class="hit" x={cx - w / 2 - 4} y={ly - 11} width={w + 8} height={ERA_ROW} />
+          <text class:small={narrow} x={cx} y={ly} text-anchor="middle">{p.name}</text>
+        </g>
+      {/each}
+      <rect class="eras-window" x={eraWindow.x} y={ERA_BAR_Y - 3} width={eraWindow.w} height={ERA_SEG_H + 6} rx="3" />
+    </g>
   </svg>
 
   {#if hovered && hovered.item !== focus}
@@ -1084,6 +1158,59 @@
     fill: var(--ink-3);
   }
   .vignette {
+    pointer-events: none;
+  }
+
+  /* The era bar */
+  .eras-back {
+    fill: var(--paper);
+    opacity: 0.94;
+  }
+  .era-tab {
+    cursor: pointer;
+    outline: none;
+  }
+  .era-seg {
+    fill: var(--band);
+    stroke: var(--rule);
+    transition: fill 0.15s;
+  }
+  .era-seg.alt {
+    fill: var(--rule);
+  }
+  .era-lead {
+    stroke: var(--rule);
+  }
+  .era-tab text {
+    font-size: 11px;
+    fill: var(--ink-2);
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+    transition: fill 0.15s;
+  }
+  .era-tab text.small {
+    font-size: 10px;
+  }
+  .era-tab:hover .era-seg,
+  .era-tab:focus-visible .era-seg,
+  .era-tab.on .era-seg {
+    fill: color-mix(in srgb, var(--gold) 45%, transparent);
+  }
+  .era-tab:hover text,
+  .era-tab:focus-visible text,
+  .era-tab.on text {
+    fill: var(--accent);
+  }
+  .era-tab:hover .era-lead,
+  .era-tab.on .era-lead {
+    stroke: var(--gold);
+  }
+  .eras-window {
+    fill: none;
+    stroke: var(--gold);
+    stroke-width: 1.5;
     pointer-events: none;
   }
 
