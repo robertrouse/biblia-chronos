@@ -32,7 +32,7 @@
   import { addInertia } from "../lib/inertia.ts"
   import { remember } from "../lib/remember.ts"
   import { ms } from "../lib/motion.ts"
-  // A narrow face for era names, so they can run large. Bundled, not fetched
+  // A narrow face for the era bar, so its names can run larger. Bundled, not fetched
   // from a font service, so the installed app keeps it offline.
   import "@fontsource/pt-sans-caption/latin-400.css"
   import "@fontsource/pt-sans-caption/latin-700.css"
@@ -92,9 +92,9 @@
   // that clears its neighbour, and otherwise steps a row further out; a
   // hairline ties any name that moved to its era. Time starts below the bar.
   const ERA_TOP = 62 // under the site bar
-  const ERA_SEG_H = 17 // tall enough to hold its years
-  const ERA_ROW = 14
-  const eraCharW = $derived(narrow ? 5.3 : 5.8) // width of a letter in its labels (PT Sans Caption, measured)
+  const ERA_SEG_H = 20 // tall enough to hold its years
+  const ERA_ROW = 16
+  const eraCharW = $derived(narrow ? 6.0 : 6.8) // width of a letter in its labels (PT Sans Caption 11.5/13px, measured)
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
   const eraPlaced = $derived.by(() => {
     const spans = periods.map((p) => ({ p, a: eraX(p.start), b: eraX(p.end) }))
@@ -129,8 +129,8 @@
   // to two rows, and one that can't sit there either is left out (its era's
   // dates are on its big name). BC is said once at the start and on the last
   // year before AD.
-  const YEAR_ROW = 11
-  const YEAR_CHAR = 5.6 // width of a character in the year labels (measured)
+  const YEAR_ROW = 13
+  const YEAR_CHAR = 6.4 // width of a character in the year labels (11px, measured)
   const yearLabel = (year: number, n: number, all: number[]) =>
     year > 0 ? `AD ${year}` : n === 0 || (all[n + 1] ?? 1) > 0 ? formatYear(year) : `${1 - year}`
   const eraYears = $derived.by(() => {
@@ -172,7 +172,7 @@
     eraPlaced.map((t) =>
       t.side === "above"
         ? { ...t, y: ERA_BAR_Y - 5 - t.row * ERA_ROW, from: ERA_BAR_Y, to: ERA_BAR_Y - 2 - t.row * ERA_ROW }
-        : { ...t, y: BELOW_BAR + 12 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: BELOW_BAR + 2 + t.row * ERA_ROW },
+        : { ...t, y: BELOW_BAR + 13 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: BELOW_BAR + 2 + t.row * ERA_ROW },
     ),
   )
   const TOP = $derived(BELOW_BAR + 4 + rowsOn("below") * ERA_ROW + 12)
@@ -185,7 +185,7 @@
   })
   const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
   const TRACK_GAP = $derived(narrow ? 8 : 14) // either side of the kingdoms track
-  const eraW = $derived(narrow ? 0 : Math.round(Math.min(280, Math.max(160, width * 0.17))))
+  const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
   const contentL = $derived(eraW + 8)
   const contentR = $derived(width - (narrow ? 10 : 22))
   const tickW = $derived(narrow ? 48 : 62)
@@ -424,9 +424,9 @@
   // Large era names down the left edge, upright, wrapped to the column and
   // sized to fit it and their band; each sticks to the top of its band and is
   // clipped to it.
-  // PT Sans Caption bold capitals run about 0.66 em a letter, spacing included.
-  const TITLE_EM = 0.66
-  const TITLE_LINE = 0.98 // line height, in em
+  // The serif capitals, letter-spaced, run about 0.82 em a letter.
+  const TITLE_EM = 0.82
+  const TITLE_LINE = 1.05 // line height, in em
   function fitTitle(text: string, room: number, tall: number) {
     const words = text.split(" ")
     let best = { lines: [text], size: 0 }
@@ -434,7 +434,7 @@
       const lines = wrap(text, Math.max(...words.map((w) => w.length), Math.ceil(text.length / n)), 1)
       if (lines.length > n) continue
       const longest = Math.max(...lines.map((l) => l.length))
-      const size = Math.min(84, room / (longest * TITLE_EM), tall / (lines.length * TITLE_LINE))
+      const size = Math.min(56, room / (longest * TITLE_EM), tall / (lines.length * TITLE_LINE))
       if (size > best.size) best = { lines, size }
     }
     return best
@@ -905,16 +905,16 @@
           <rect class="era-seg" x={a} y={ERA_BAR_Y} width={Math.max(1, b - a - 1.5)} height={ERA_SEG_H} rx="2" />
           <rect class="hit" x={a} y={ERA_BAR_Y - 4} width={Math.max(4, b - a)} height={ERA_SEG_H + 8} />
           {#if moved}<line class="era-lead" x1={mid} x2={lx} y1={from} y2={to} />{/if}
-          <rect class="hit" x={cx - w / 2 - 4} y={ly - 11} width={w + 8} height={ERA_ROW} />
+          <rect class="hit" x={cx - w / 2 - 4} y={ly - 12} width={w + 8} height={ERA_ROW} />
           <text class:small={narrow} x={cx} y={ly} text-anchor="middle">{p.name}</text>
         </g>
       {/each}
       {#each eraYears as l (l.year)}
         {#if l.inside}
-          <text class="era-year inside" style="--hue: {hue(l.era)}" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H / 2 + 3.5} text-anchor={l.anchor}>{l.text}</text>
+          <text class="era-year inside" style="--hue: {hue(l.era)}" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H / 2 + 4} text-anchor={l.anchor}>{l.text}</text>
         {:else}
           <line class="era-divide" x1={l.x} x2={l.x} y1={ERA_BAR_Y - 2} y2={ERA_BAR_Y + ERA_SEG_H + 2 + l.row * YEAR_ROW} />
-          <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 11 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
+          <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 12 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
         {/if}
       {/each}
       <rect class="eras-window" x={eraWindow.x} y={ERA_BAR_Y - 3} width={eraWindow.w} height={ERA_SEG_H + 6} rx="3" />
@@ -1007,9 +1007,9 @@
     cursor: pointer;
   }
   .era-name {
-    font-family: "PT Sans Caption", var(--sans);
-    font-weight: 700;
-    letter-spacing: 0.03em;
+    font-family: var(--serif);
+    font-weight: 600;
+    letter-spacing: 0.1em;
     fill: hsl(var(--hue) 45% 38% / 0.2);
     transition: fill 0.2s;
   }
@@ -1274,7 +1274,7 @@
   }
   .era-tab text {
     font-family: "PT Sans Caption", var(--sans);
-    font-size: 11px;
+    font-size: 13px;
     fill: hsl(var(--hue) 40% 30%);
     paint-order: stroke;
     stroke: var(--paper);
@@ -1283,7 +1283,7 @@
     transition: fill 0.15s;
   }
   .era-tab text.small {
-    font-size: 10px;
+    font-size: 11.5px;
   }
   .era-tab:hover .era-seg,
   .era-tab:focus-visible .era-seg,
@@ -1336,7 +1336,7 @@
     pointer-events: none;
   }
   .era-year {
-    font: 9.5px "PT Sans Caption", var(--sans);
+    font: 11px "PT Sans Caption", var(--sans);
     fill: var(--ink-3);
     font-variant-numeric: tabular-nums;
     pointer-events: none;
