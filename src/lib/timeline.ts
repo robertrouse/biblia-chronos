@@ -22,6 +22,9 @@ export type TimelineItem = {
   eras: string // the eras it overlaps, e.g. "Israel in Egypt, Exodus & Wilderness"
   summary?: string
   related: string[] // ids of connected items on the timeline: family, events, participants
+  // People only: their parents who are on the timeline too, for the lines that
+  // tie a child's birth to the parent's life. Left out when there are none.
+  parents?: string[]
 }
 
 export type TimelinePeriod = { id: string; name: string; start: number; end: number; when: string; summary?: string }
@@ -40,13 +43,15 @@ export function timelinePeriods(periods: Period[]): TimelinePeriod[] {
 // Everything dated within the periods' range, heaviest first (the order lanes
 // are packed in). "Lifetime of X" events are left out: they'd duplicate X's
 // own bar in the people lanes; so are God and the Holy Spirit (TIMELESS). `connections` lists any record's linked ids;
-// only those that are themselves on the timeline are kept.
+// only those that are themselves on the timeline are kept. `parentsOf` lists a
+// person's parents, kept the same way.
 export function timelineItems(
   people: Person[],
   events: Event[],
   periods: Period[],
   eventsOf: (personId: string) => Event[],
   connections: (id: string) => string[] = () => [],
+  parentsOf: (personId: string) => string[] = () => [],
 ): TimelineItem[] {
   const first = periods[0].date.earliest
   const last = periods[periods.length - 1].date.latest
@@ -82,7 +87,11 @@ export function timelineItems(
   ].sort((a, b) => b.weight - a.weight)
 
   const onTimeline = new Set(items.map((i) => i.id))
-  return items.map((i) => ({ ...i, related: [...new Set(connections(i.id))].filter((id) => onTimeline.has(id)) }))
+  const kept = (ids: string[]) => [...new Set(ids)].filter((id) => onTimeline.has(id))
+  return items.map((i) => {
+    const parents = i.kind === "person" ? kept(parentsOf(i.id)) : []
+    return { ...i, related: kept(connections(i.id)), ...(parents.length && { parents }) }
+  })
 }
 
 // --- Lane packing -----------------------------------------------------------

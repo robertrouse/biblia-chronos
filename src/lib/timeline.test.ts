@@ -83,6 +83,17 @@ test("timelineItems keeps dated items in range and skips lifetime-of events", ()
   assert.deepEqual(items[1].marks, [-60, -50])
   // connections keep only items that made it onto the timeline
   assert.deepEqual(items[1].related, ["in"])
+  assert.equal(items[1].parents, undefined)
+})
+
+test("timelineItems keeps a person's parents who are on the timeline", () => {
+  const parent: Person = { id: "seraiah", name: "Seraiah", kind: "person", source: "t", birth: { earliest: -90 }, death: { earliest: -20 } }
+  const child: Person = { id: "ezra", name: "Ezra", kind: "person", source: "t", birth: { earliest: -60 }, death: { earliest: -10 } }
+  const parents: Record<string, string[]> = { ezra: ["seraiah", "offstage"], seraiah: [] }
+  const items = timelineItems([parent, child], [], [period], () => [], () => [], (id) => parents[id] ?? [])
+  const by = Object.fromEntries(items.map((i) => [i.id, i]))
+  assert.deepEqual(by.ezra.parents, ["seraiah"])
+  assert.equal(by.seraiah.parents, undefined)
 })
 
 test("timelineItems leaves God off the people lanes", () => {

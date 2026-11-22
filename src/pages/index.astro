@@ -15,7 +15,7 @@ const connections = (id: string) => [
 
 // The timeline's slice of the data, computed at build time and passed to the
 // island as props — the island never sees the full dataset.
-const items = timelineItems(people, events, periods, eventsOf, connections)
+const items = timelineItems(people, events, periods, eventsOf, connections, (id) => graph.incoming(id, "parent-of"))
 ---
 
 <Page

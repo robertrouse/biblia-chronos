@@ -356,6 +356,23 @@
       ),
     ]),
   )
+  // Lineage: where a person's parent is on screen too, a hairline at the
+  // child's first year runs from the parent's life to the child, so Adam's
+  // line at 3874 BC leads to the start of Seth's. Only when the parent's span
+  // covers that year: a line never says a parent was alive when the dates
+  // don't.
+  const lineage = $derived(
+    visible[1].flatMap(({ item }) =>
+      (item.parents ?? []).flatMap((id) => {
+        const parent = byId.get(id)
+        const from = anchors.get(id)
+        const to = anchors.get(item.id)
+        if (!parent || !from || !to || item.start < parent.start || item.start > parent.end + 1) return []
+        return [{ key: `${id}>${item.id}`, parent: id, child: item.id, y: y(item.start), x0: from[2], x1: to[2] }]
+      }),
+    ),
+  )
+
   // A label's centre line sticks to the top of the view while its item runs
   // off it, but never slides past the item's end.
   const labelY = (ys: number, ye: number) => Math.max(ys, Math.min(TOP + 10, ye))
@@ -720,6 +737,18 @@
       </g>
     {/each}
 
+    <!-- Lineage: a parent's life to a child's first year -->
+    {#each lineage as l (l.key)}
+      <g
+        class="lineage"
+        class:dim={!!focus && focus.id !== l.parent && focus.id !== l.child}
+        class:lit={focus?.id === l.parent || focus?.id === l.child}
+      >
+        <line x1={l.x0} x2={l.x1} y1={l.y} y2={l.y} />
+        <circle cx={l.x0} cy={l.y} r="2.5" />
+      </g>
+    {/each}
+
     <!-- Links from the selection to its connections -->
     {#if focus && anchors.has(focus.id)}
       {@const [fy0, fy1, fx] = anchors.get(focus.id)!}
@@ -987,6 +1016,14 @@
     font-size: 12px;
     fill: var(--ink-2);
   }
+  /* People's names keep a paper halo, so a lineage line passing behind one
+     doesn't strike it through. */
+  .person text {
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
   .item text.strong {
     fill: var(--ink);
     font-weight: 600;
@@ -1029,6 +1066,30 @@
   .item.focus .ribbon,
   .item.focus .sighting {
     fill: var(--accent);
+  }
+  .lineage {
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .lineage line {
+    stroke: var(--people);
+    stroke-opacity: 0.45;
+  }
+  .lineage circle {
+    fill: var(--people);
+    opacity: 0.7;
+  }
+  .lineage.dim {
+    opacity: 0.2;
+  }
+  .lineage.lit line {
+    stroke: var(--accent);
+    stroke-opacity: 0.85;
+    stroke-width: 1.3;
+  }
+  .lineage.lit circle {
+    fill: var(--accent);
+    opacity: 1;
   }
   .link {
     fill: none;
