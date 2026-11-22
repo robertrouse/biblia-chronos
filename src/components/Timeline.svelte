@@ -32,6 +32,10 @@
   import { addInertia } from "../lib/inertia.ts"
   import { remember } from "../lib/remember.ts"
   import { ms } from "../lib/motion.ts"
+  // A narrow face for era names, so they can run large. Bundled, not fetched
+  // from a font service, so the installed app keeps it offline.
+  import "@fontsource/pt-sans-caption/latin-400.css"
+  import "@fontsource/pt-sans-caption/latin-700.css"
 
   let { items, periods, kingdoms }: { items: TimelineItem[]; periods: TimelinePeriod[]; kingdoms: KingdomTrack } =
     $props()
@@ -88,9 +92,9 @@
   // that clears its neighbour, and otherwise steps a row further out; a
   // hairline ties any name that moved to its era. Time starts below the bar.
   const ERA_TOP = 62 // under the site bar
-  const ERA_SEG_H = 10
+  const ERA_SEG_H = 17 // tall enough to hold its years
   const ERA_ROW = 14
-  const eraCharW = $derived(narrow ? 5.6 : 6.2) // rough width of a letter in its labels
+  const eraCharW = $derived(narrow ? 5.3 : 5.8) // width of a letter in its labels (PT Sans Caption, measured)
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
   const eraPlaced = $derived.by(() => {
     const spans = periods.map((p) => ({ p, a: eraX(p.start), b: eraX(p.end) }))
@@ -119,25 +123,49 @@
     Math.max(0, ...eraPlaced.filter((t) => t.side === side).map((t) => t.row + 1))
   const ERA_BAR_Y = $derived(ERA_TOP + rowsOn("above") * ERA_ROW + 4)
 
-  // Years where eras meet, in up to two rows just under the bar; one that
-  // can't sit by its line is left out (its era's dates are on its big name).
-  // BC is said once at the start and on the last year before AD.
+  // Years where eras meet. Each era's first year sits inside its own segment
+  // at the left end, and the last era's end at its right, when there's room;
+  // a year that won't fit inside goes just under the bar by its line, in up
+  // to two rows, and one that can't sit there either is left out (its era's
+  // dates are on its big name). BC is said once at the start and on the last
+  // year before AD.
   const YEAR_ROW = 11
+  const YEAR_CHAR = 5.6 // width of a character in the year labels (measured)
   const yearLabel = (year: number, n: number, all: number[]) =>
     year > 0 ? `AD ${year}` : n === 0 || (all[n + 1] ?? 1) > 0 ? formatYear(year) : `${1 - year}`
   const eraYears = $derived.by(() => {
     const years = [periods[0].start, ...periods.map((p) => p.end)]
-    const labels = years.map((year, n) => ({ year, x: eraX(year), text: yearLabel(year, n, years) }))
+    const last = periods.length - 1
+    const labels = years.map((year, n) => {
+      const text = yearLabel(year, n, years)
+      return { year, text, x: eraX(year), w: text.length * YEAR_CHAR, era: periods[Math.min(n, last)] }
+    })
+    const room = (p: TimelinePeriod) => eraX(p.end) - eraX(p.start)
+    const inside = labels.map((l, n) => {
+      if (n < periods.length) return l.w + 8 <= room(l.era)
+      // The end of the last era shares its segment with that era's start.
+      const start = labels[last]
+      return l.w + 8 + (start.w + 8 <= room(l.era) ? start.w + 6 : 0) <= room(l.era)
+    })
+    const outside = labels.filter((_, n) => !inside[n])
     const spots = staggerLabels(
-      labels.map((l) => ({ at: l.x, width: l.text.length * 5.2 })),
+      outside.map((l) => ({ at: l.x, width: l.w })),
       4,
       width - 4,
       { gap: 6, slack: () => 4, maxRows: 2 },
     )
-    return labels.flatMap((l, n) => (spots[n] ? [{ ...l, cx: spots[n]!.x, row: spots[n]!.row }] : []))
+    const spot = new Map(outside.map((l, n) => [l, spots[n]]))
+    return labels.flatMap((l, n) => {
+      if (inside[n]) {
+        const end = n === periods.length
+        return [{ ...l, inside: true, cx: end ? l.x - 4 : l.x + 4, row: 0, anchor: end ? "end" : "start" }]
+      }
+      const at = spot.get(l)
+      return at ? [{ ...l, inside: false, cx: at.x, row: at.row, anchor: "middle" }] : []
+    })
   })
-  const yearRows = $derived(Math.max(1, ...eraYears.map((l) => l.row + 1)))
-  const BELOW_BAR = $derived(ERA_BAR_Y + ERA_SEG_H + 2 + yearRows * YEAR_ROW) // where the names below start
+  const yearRows = $derived(Math.max(0, ...eraYears.filter((l) => !l.inside).map((l) => l.row + 1)))
+  const BELOW_BAR = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + yearRows * YEAR_ROW) // where the names below start
 
   // Each name's baseline, and where its hairline leaves the bar and meets it.
   const eraTabs = $derived(
@@ -157,7 +185,7 @@
   })
   const AXIS_GAP = $derived(narrow ? 18 : 26) // axis to the first event lane
   const TRACK_GAP = $derived(narrow ? 8 : 14) // either side of the kingdoms track
-  const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
+  const eraW = $derived(narrow ? 0 : Math.round(Math.min(280, Math.max(160, width * 0.17))))
   const contentL = $derived(eraW + 8)
   const contentR = $derived(width - (narrow ? 10 : 22))
   const tickW = $derived(narrow ? 48 : 62)
@@ -373,6 +401,13 @@
     ),
   )
 
+  // Across at the birth year, then a rounded turn down into the child's line.
+  function elbow({ x0, x1, y }: { x0: number; x1: number; y: number }) {
+    const r = Math.min(8, Math.abs(x1 - x0))
+    const turn = x1 - Math.sign(x1 - x0) * r
+    return `M${x0},${y} H${turn} Q${x1},${y} ${x1},${y + r} V${y + r + 6}`
+  }
+
   // A label's centre line sticks to the top of the view while its item runs
   // off it, but never slides past the item's end.
   const labelY = (ys: number, ye: number) => Math.max(ys, Math.min(TOP + 10, ye))
@@ -389,6 +424,9 @@
   // Large era names down the left edge, upright, wrapped to the column and
   // sized to fit it and their band; each sticks to the top of its band and is
   // clipped to it.
+  // PT Sans Caption bold capitals run about 0.66 em a letter, spacing included.
+  const TITLE_EM = 0.66
+  const TITLE_LINE = 0.98 // line height, in em
   function fitTitle(text: string, room: number, tall: number) {
     const words = text.split(" ")
     let best = { lines: [text], size: 0 }
@@ -396,7 +434,7 @@
       const lines = wrap(text, Math.max(...words.map((w) => w.length), Math.ceil(text.length / n)), 1)
       if (lines.length > n) continue
       const longest = Math.max(...lines.map((l) => l.length))
-      const size = Math.min(56, room / (longest * 0.82), tall / (lines.length * 1.05))
+      const size = Math.min(84, room / (longest * TITLE_EM), tall / (lines.length * TITLE_LINE))
       if (size > best.size) best = { lines, size }
     }
     return best
@@ -660,9 +698,9 @@
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <g class="era" style="--hue: {hue(p)}" onclick={() => pickPeriod(p)}>
           <text class="era-name" clip-path="url(#tl-clip-{p.id})" x={eraLeft} y={top + size * 0.8} style="font-size: {size}px"
-            >{#each lines as line, n (n)}<tspan x={eraLeft} dy={n ? size * 1.05 : 0}>{line}</tspan>{/each}</text
+            >{#each lines as line, n (n)}<tspan x={eraLeft} dy={n ? size * TITLE_LINE : 0}>{line}</tspan>{/each}</text
           >
-          <text class="era-dates" clip-path="url(#tl-clip-{p.id})" x={eraLeft + 4} y={top + size * 0.8 + (lines.length - 1) * size * 1.05 + 22}
+          <text class="era-dates" clip-path="url(#tl-clip-{p.id})" x={eraLeft + 4} y={top + size * 0.8 + (lines.length - 1) * size * TITLE_LINE + 22}
             >{p.when}</text
           >
         </g>
@@ -744,7 +782,7 @@
         class:dim={!!focus && focus.id !== l.parent && focus.id !== l.child}
         class:lit={focus?.id === l.parent || focus?.id === l.child}
       >
-        <line x1={l.x0} x2={l.x1} y1={l.y} y2={l.y} />
+        <path d={elbow(l)} />
         <circle cx={l.x0} cy={l.y} r="2.5" />
       </g>
     {/each}
@@ -872,8 +910,12 @@
         </g>
       {/each}
       {#each eraYears as l (l.year)}
-        <line class="era-divide" x1={l.x} x2={l.x} y1={ERA_BAR_Y - 2} y2={ERA_BAR_Y + ERA_SEG_H + 2 + l.row * YEAR_ROW} />
-        <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 10 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
+        {#if l.inside}
+          <text class="era-year inside" style="--hue: {hue(l.era)}" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H / 2 + 3.5} text-anchor={l.anchor}>{l.text}</text>
+        {:else}
+          <line class="era-divide" x1={l.x} x2={l.x} y1={ERA_BAR_Y - 2} y2={ERA_BAR_Y + ERA_SEG_H + 2 + l.row * YEAR_ROW} />
+          <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 11 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
+        {/if}
       {/each}
       <rect class="eras-window" x={eraWindow.x} y={ERA_BAR_Y - 3} width={eraWindow.w} height={ERA_SEG_H + 6} rx="3" />
     </g>
@@ -965,9 +1007,9 @@
     cursor: pointer;
   }
   .era-name {
-    font-family: var(--serif);
-    font-weight: 600;
-    letter-spacing: 0.1em;
+    font-family: "PT Sans Caption", var(--sans);
+    font-weight: 700;
+    letter-spacing: 0.03em;
     fill: hsl(var(--hue) 45% 38% / 0.2);
     transition: fill 0.2s;
   }
@@ -1071,7 +1113,8 @@
     pointer-events: none;
     transition: opacity 0.2s;
   }
-  .lineage line {
+  .lineage path {
+    fill: none;
     stroke: var(--people);
     stroke-opacity: 0.45;
   }
@@ -1082,7 +1125,7 @@
   .lineage.dim {
     opacity: 0.2;
   }
-  .lineage.lit line {
+  .lineage.lit path {
     stroke: var(--accent);
     stroke-opacity: 0.85;
     stroke-width: 1.3;
@@ -1230,6 +1273,7 @@
     stroke: var(--rule);
   }
   .era-tab text {
+    font-family: "PT Sans Caption", var(--sans);
     font-size: 11px;
     fill: hsl(var(--hue) 40% 30%);
     paint-order: stroke;
@@ -1292,10 +1336,17 @@
     pointer-events: none;
   }
   .era-year {
-    font-size: 9px;
+    font: 9.5px "PT Sans Caption", var(--sans);
     fill: var(--ink-3);
     font-variant-numeric: tabular-nums;
     pointer-events: none;
+  }
+  .era-year.inside {
+    font-weight: 700;
+    fill: hsl(var(--hue) 45% 22%);
+  }
+  :global([data-theme="dark"]) .era-year.inside {
+    fill: hsl(var(--hue) 40% 88%);
   }
   .eras-window {
     fill: none;
