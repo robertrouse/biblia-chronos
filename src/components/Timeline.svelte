@@ -34,8 +34,8 @@
   import { ms } from "../lib/motion.ts"
   // A narrow face for the era bar, so its names can run larger. Bundled, not fetched
   // from a font service, so the installed app keeps it offline.
-  import "@fontsource/pt-sans-caption/latin-400.css"
-  import "@fontsource/pt-sans-caption/latin-700.css"
+  import "@fontsource/pt-sans-narrow/latin-400.css"
+  import "@fontsource/pt-sans-narrow/latin-700.css"
 
   let { items, periods, kingdoms }: { items: TimelineItem[]; periods: TimelinePeriod[]; kingdoms: KingdomTrack } =
     $props()
@@ -94,7 +94,7 @@
   const ERA_TOP = 62 // under the site bar
   const ERA_SEG_H = 20 // tall enough to hold its years
   const ERA_ROW = 16
-  const eraCharW = $derived(narrow ? 6.0 : 6.8) // width of a letter in its labels (PT Sans Caption 11.5/13px, measured)
+  const eraCharW = $derived(narrow ? 4.3 : 4.8) // width of a letter in its labels (PT Sans Narrow, measured)
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
   const eraPlaced = $derived.by(() => {
     const spans = periods.map((p) => ({ p, a: eraX(p.start), b: eraX(p.end) }))
@@ -130,7 +130,7 @@
   // dates are on its big name). BC is said once at the start and on the last
   // year before AD.
   const YEAR_ROW = 13
-  const YEAR_CHAR = 6.4 // width of a character in the year labels (11px, measured)
+  const YEAR_CHAR = 5.1 // width of a character in the year labels (11px PT Sans Narrow, measured)
   const yearLabel = (year: number, n: number, all: number[]) =>
     year > 0 ? `AD ${year}` : n === 0 || (all[n + 1] ?? 1) > 0 ? formatYear(year) : `${1 - year}`
   const eraYears = $derived.by(() => {
@@ -806,10 +806,29 @@
       {/each}
     {/if}
 
+    <!-- Event stems, back to the axis: a layer of their own under every mark and
+         label, so a stem passes behind the names nearer the axis rather than
+         through them. Each runs long and is clipped at the axis, and moves with
+         its event's lane. -->
+    <g clip-path="url(#tl-right-of-axis)">
+      {#each visible[0] as { item } (item.id)}
+        {@const [ys, , mx] = anchors.get(item.id)!}
+        <line
+          class="stem"
+          class:dim={dimmed(item.id)}
+          class:lit={item === focus || hovered?.item === item}
+          style="transform: translateX({mx}px)"
+          x1="0"
+          x2={-width}
+          y1={ys}
+          y2={ys}
+        />
+      {/each}
+    </g>
+
     <!-- Events right of the axis, people right of the kingdoms track, labels to
-         the right of their marks. Each item sits at its lane via a CSS transform, so a lane change on
-         zoom glides rather than jumps. Events are clipped at the axis, so their
-         stems can simply run long. -->
+         the right of their marks. Each item sits at its lane via a CSS transform,
+         so a lane change on zoom glides rather than jumps. -->
     {#each visible as placed, section (section)}
       <g clip-path={section === 0 ? "url(#tl-right-of-axis)" : undefined}>
         {#each placed as { item } (item.id)}
@@ -834,7 +853,6 @@
             onpointerleave={() => (hovered = undefined)}
           >
             {#if item.kind === "event"}
-              <line class="stem" x1="0" x2={-width} y1={ys} y2={ys} />
               <rect class="hit" x="-8" y={ys - 11} width={w + 24} height={Math.max(0, ye - ys) + 22} />
               {#if span}
                 <rect class="bar" x="-2.5" y={ys} width="5" height={ye - ys} rx="2.5" />
@@ -1058,9 +1076,9 @@
     font-size: 12px;
     fill: var(--ink-2);
   }
-  /* People's names keep a paper halo, so a lineage line passing behind one
+  /* Names keep a paper halo, so a stem or lineage line passing behind one
      doesn't strike it through. */
-  .person text {
+  .item text {
     paint-order: stroke;
     stroke: var(--paper);
     stroke-width: 3px;
@@ -1082,9 +1100,14 @@
   }
   .stem {
     stroke: var(--rule);
+    transition:
+      opacity 0.2s,
+      transform 0.28s cubic-bezier(0.2, 0.7, 0.3, 1);
   }
-  .item.focus .stem,
-  .item:hover .stem {
+  .stem.dim {
+    opacity: 0.18;
+  }
+  .stem.lit {
     stroke: var(--gold);
   }
   .bar,
@@ -1273,7 +1296,7 @@
     stroke: var(--rule);
   }
   .era-tab text {
-    font-family: "PT Sans Caption", var(--sans);
+    font-family: "PT Sans Narrow", var(--sans);
     font-size: 13px;
     fill: hsl(var(--hue) 40% 30%);
     paint-order: stroke;
@@ -1336,7 +1359,7 @@
     pointer-events: none;
   }
   .era-year {
-    font: 11px "PT Sans Caption", var(--sans);
+    font: 11px "PT Sans Narrow", var(--sans);
     fill: var(--ink-3);
     font-variant-numeric: tabular-nums;
     pointer-events: none;
