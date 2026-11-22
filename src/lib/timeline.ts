@@ -177,3 +177,31 @@ function firstEndingAfter(lane: [number, number][], x: number) {
   }
   return lo
 }
+
+// --- Staggered labels ---------------------------------------------------------
+
+// Labels along a line (the era bar), each wanting to be centred at `at`, kept
+// within [left, right]. Each goes in the first row where it fits, sliding along
+// by at most `slack` px to clear the label before it; past `maxRows` rows a
+// label that fits nowhere is dropped (undefined). Returns each label's centre
+// and row.
+export function staggerLabels(
+  labels: { at: number; width: number }[],
+  left: number,
+  right: number,
+  { gap = 12, slack = (w: number) => Math.max(40, w * 0.6), maxRows = Infinity } = {},
+): ({ x: number; row: number } | undefined)[] {
+  const rows: number[] = [] // where the last label in each row ends
+  return labels.map(({ at, width: w }) => {
+    const ideal = Math.max(left + w / 2, Math.min(right - w / 2, at))
+    const fit = (end: number) => Math.max(ideal, end + gap + w / 2)
+    let row = rows.findIndex((end) => fit(end) - ideal <= slack(w) && fit(end) + w / 2 <= right)
+    if (row === -1) {
+      if (rows.length >= maxRows) return undefined
+      row = rows.push(-Infinity) - 1
+    }
+    const x = fit(rows[row])
+    rows[row] = x + w / 2
+    return { x, row }
+  })
+}

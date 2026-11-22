@@ -4,8 +4,9 @@
   // with its years; events branch off to its right, then the kingdoms track
   // shows who sat on each throne (the united monarchy forking into Israel and
   // Judah, each king coloured by his ruling house), then people's lives run
-  // down beside it. Click anyone to light up their connections. An overview
-  // scrollbar down the right edge shows where you are in the whole story.
+  // down beside it. Click anyone to light up their connections. The era bar
+  // along the top shows the whole story and where you are in it: click an era
+  // to see all of it, or drag along the bar to scroll.
   //
   // It is the horizontal timeline turned a quarter turn clockwise, with every
   // label kept upright. Labels now run across the time axis instead of along
@@ -24,7 +25,7 @@
   import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom"
   import { select } from "d3-selection"
   import "d3-transition"
-  import { packInTimeOrder, type TimelineItem, type TimelinePeriod } from "../lib/timeline.ts"
+  import { packInTimeOrder, staggerLabels, type TimelineItem, type TimelinePeriod } from "../lib/timeline.ts"
   import { dynasties, placeLabels, reignNote, type KingdomRow, type KingdomTrack, type Reign } from "../lib/kingdoms.ts"
   import { formatSpan, formatYear, labelWidth } from "../lib/format.ts"
   import { entityUrl, setHash } from "../lib/url.ts"
@@ -65,7 +66,7 @@
   let behavior: ZoomBehavior<SVGSVGElement, unknown>
 
   // Columns, left to right: the era names, tick labels, the axis, event lanes,
-  // the kingdoms track, people lanes, and the overview bar.
+  // the kingdoms track, and people lanes.
   // On a phone every pixel across counts: the kingdoms track slims to bare
   // blocks (tap one for its king) and events get the larger share.
   const narrow = $derived(width < 700)
@@ -92,40 +93,61 @@
   const eraCharW = $derived(narrow ? 5.6 : 6.2) // rough width of a letter in its labels
   const eraX = $derived(scaleLinear().domain(domain).range([16, width - 16]))
   const eraPlaced = $derived.by(() => {
-    // Per side, where the last name in each row ends
-    const rows = { above: [] as number[], below: [] as number[] }
-    return periods.map((p, n) => {
-      const side: "above" | "below" = n % 2 === 0 ? "above" : "below"
-      const ends = rows[side]
-      const a = eraX(p.start)
-      const b = eraX(p.end)
-      const mid = (a + b) / 2
+    const spans = periods.map((p) => ({ p, a: eraX(p.start), b: eraX(p.end) }))
+    const side = (n: number): "above" | "below" => (n % 2 === 0 ? "above" : "below")
+    const place = (s: "above" | "below") => {
+      const mine = spans.filter((_, n) => side(n) === s)
+      const spots = staggerLabels(
+        mine.map(({ p, a, b }) => ({ at: (a + b) / 2, width: p.name.length * eraCharW })),
+        16,
+        width - 16,
+      )
+      return new Map(mine.map((m, n) => [m.p, spots[n]!]))
+    }
+    const spots = { above: place("above"), below: place("below") }
+    return spans.map(({ p, a, b }, n) => {
+      const { x: cx, row } = spots[side(n)].get(p)!
       const w = p.name.length * eraCharW
-      const ideal = Math.max(16 + w / 2, Math.min(width - 16 - w / 2, mid))
-      const slack = Math.max(40, w * 0.6) // how far it may slide from its era
-      const at = (end: number) => Math.max(ideal, end + 12 + w / 2)
-      let row = ends.findIndex((end) => at(end) - ideal <= slack && at(end) + w / 2 <= width - 16)
-      if (row === -1) row = ends.push(-Infinity) - 1
-      const cx = at(ends[row])
-      ends[row] = cx + w / 2
+      const mid = (a + b) / 2
       // Where its hairline meets it: the point of the name nearest its era.
       const lx = Math.max(cx - w / 2 + 4, Math.min(cx + w / 2 - 4, mid))
       const moved = row > 0 || cx - w / 2 > b || cx + w / 2 < a
-      return { p, a, b, mid, cx, w, lx, moved, side, row }
+      return { p, a, b, mid, cx, w, lx, moved, side: side(n), row }
     })
   })
   const rowsOn = (side: "above" | "below") =>
     Math.max(0, ...eraPlaced.filter((t) => t.side === side).map((t) => t.row + 1))
   const ERA_BAR_Y = $derived(ERA_TOP + rowsOn("above") * ERA_ROW + 4)
+
+  // Years where eras meet, in up to two rows just under the bar; one that
+  // can't sit by its line is left out (its era's dates are on its big name).
+  // BC is said once at the start and on the last year before AD.
+  const YEAR_ROW = 11
+  const yearLabel = (year: number, n: number, all: number[]) =>
+    year > 0 ? `AD ${year}` : n === 0 || (all[n + 1] ?? 1) > 0 ? formatYear(year) : `${1 - year}`
+  const eraYears = $derived.by(() => {
+    const years = [periods[0].start, ...periods.map((p) => p.end)]
+    const labels = years.map((year, n) => ({ year, x: eraX(year), text: yearLabel(year, n, years) }))
+    const spots = staggerLabels(
+      labels.map((l) => ({ at: l.x, width: l.text.length * 5.2 })),
+      4,
+      width - 4,
+      { gap: 6, slack: () => 4, maxRows: 2 },
+    )
+    return labels.flatMap((l, n) => (spots[n] ? [{ ...l, cx: spots[n]!.x, row: spots[n]!.row }] : []))
+  })
+  const yearRows = $derived(Math.max(1, ...eraYears.map((l) => l.row + 1)))
+  const BELOW_BAR = $derived(ERA_BAR_Y + ERA_SEG_H + 2 + yearRows * YEAR_ROW) // where the names below start
+
   // Each name's baseline, and where its hairline leaves the bar and meets it.
   const eraTabs = $derived(
     eraPlaced.map((t) =>
       t.side === "above"
         ? { ...t, y: ERA_BAR_Y - 5 - t.row * ERA_ROW, from: ERA_BAR_Y, to: ERA_BAR_Y - 2 - t.row * ERA_ROW }
-        : { ...t, y: ERA_BAR_Y + ERA_SEG_H + 14 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: ERA_BAR_Y + ERA_SEG_H + 4 + t.row * ERA_ROW },
+        : { ...t, y: BELOW_BAR + 12 + t.row * ERA_ROW, from: ERA_BAR_Y + ERA_SEG_H, to: BELOW_BAR + 2 + t.row * ERA_ROW },
     ),
   )
-  const TOP = $derived(ERA_BAR_Y + ERA_SEG_H + 4 + rowsOn("below") * ERA_ROW + 12)
+  const TOP = $derived(BELOW_BAR + 4 + rowsOn("below") * ERA_ROW + 12)
   const CARD_TOP = $derived(TOP + 8)
   // What's in view, marked on the era bar.
   const eraWindow = $derived.by(() => {
@@ -137,8 +159,7 @@
   const TRACK_GAP = $derived(narrow ? 8 : 14) // either side of the kingdoms track
   const eraW = $derived(narrow ? 0 : Math.round(Math.min(240, Math.max(140, width * 0.15))))
   const contentL = $derived(eraW + 8)
-  const barX = $derived(width - (narrow ? 12 : 26) - 18) // the overview bar
-  const contentR = $derived(barX - 16)
+  const contentR = $derived(width - (narrow ? 10 : 22))
   const tickW = $derived(narrow ? 48 : 62)
   const trackCol = $derived(!kingdoms.kingdoms.length ? 0 : narrow ? 18 : width < 1100 ? 66 : 86)
   const colGap = $derived(narrow ? 5 : 12) // between track columns
@@ -376,27 +397,26 @@
   const eraLeft = $derived(narrow ? 12 : 22)
   const tickLabel = (year: number) => (year === 0 ? "BC | AD" : formatYear(year))
 
-  // --- Overview bar -------------------------------------------------------------
+  // --- Dragging along the era bar ------------------------------------------------
 
-  // The whole story down the right edge, with a window on what's in view: drag
-  // it like a scrollbar.
-  const stripTop = $derived(TOP + 22)
-  const stripBottom = $derived(height - 36)
-  const sy = $derived(scaleLinear().domain(domain).range([stripTop, stripBottom]))
-  const density = $derived.by(() => {
-    const bins = new Map<number, number>()
-    for (const i of items) {
-      if (i.start < domain[0]) continue // starts before the first era
-      const b = Math.floor(sy(i.start) / 4) * 4
-      bins.set(b, (bins.get(b) ?? 0) + 1)
-    }
-    return [...bins]
-  })
-  function onStrip(e: PointerEvent) {
-    if (e.type === "pointerdown") (e.currentTarget as Element).setPointerCapture(e.pointerId)
-    else if (!(e.buttons & 1)) return
-    behavior.translateTo(select(svg), width / 2, base(sy.invert(e.offsetY)))
+  // A press on the era bar that moves scrolls the timeline to where the
+  // pointer is, like a scrollbar; one that doesn't is a click on an era.
+  let scrub: { x: number; moved: boolean } | undefined
+  const barPoint = (e: PointerEvent) => e.clientX - svg.getBoundingClientRect().left
+  function onBarDown(e: PointerEvent) {
+    if (!e.button) scrub = { x: barPoint(e), moved: false }
   }
+  function onBarMove(e: PointerEvent) {
+    if (!scrub || !(e.buttons & 1)) return
+    if (!scrub.moved) {
+      if (Math.abs(barPoint(e) - scrub.x) < 4) return
+      scrub.moved = true
+      ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
+    }
+    behavior.translateTo(select(svg), width / 2, base(eraX.invert(barPoint(e))))
+  }
+  // Cleared after the click that ends a drag, so the drag doesn't pick an era.
+  const onBarUp = () => setTimeout(() => (scrub = undefined))
 
   // --- Zoom and navigation ----------------------------------------------------
 
@@ -429,7 +449,7 @@
       .filter(
         (e) =>
           !e.button &&
-          !(e.target as Element).closest?.(".strip, .eras") &&
+          !(e.target as Element).closest?.(".eras") &&
           (e.type !== "wheel" || e.ctrlKey || e.metaKey),
       )
       .on("zoom", (e) => {
@@ -789,42 +809,12 @@
       </g>
     {/each}
 
-    <!-- Overview bar: the whole story, with a window on what's in view -->
-    <g
-      class="strip"
-      onpointerdown={onStrip}
-      onpointermove={onStrip}
-      role="scrollbar"
-      aria-controls="timeline-canvas"
-      aria-orientation="vertical"
-      aria-label="Overview"
-      aria-valuenow={Math.round((y.domain()[0] + y.domain()[1]) / 2)}
-      tabindex="-1"
-    >
-      <rect class="strip-hit" x={barX - 12} y={stripTop - 10} width="42" height={stripBottom - stripTop + 20} />
-      {#each periods as p (p.id)}
-        <rect class="strip-era" style="--hue: {hue(p)}" x={barX} y={sy(p.start)} width="18" height={Math.max(0, sy(p.end) - sy(p.start) - 1.5)} rx="2" />
-      {/each}
-      {#each density as [by, count] (by)}
-        <rect class="strip-bin" x={barX} y={by} width={Math.min(14, count * 1.3)} height="3" />
-      {/each}
-      <rect
-        class="strip-window"
-        x={barX - 4}
-        y={Math.max(stripTop, sy(y.domain()[0]))}
-        width="26"
-        height={Math.max(4, Math.min(stripBottom, sy(y.domain()[1])) - Math.max(stripTop, sy(y.domain()[0])))}
-        rx="4"
-      />
-      <text class="strip-label" x={narrow ? width - 4 : barX + 9} y={stripTop - 10} text-anchor={narrow ? "end" : "middle"}>Creation</text>
-      <text class="strip-label" x={narrow ? width - 4 : barX + 9} y={stripBottom + 22} text-anchor={narrow ? "end" : "middle"}>Early church</text>
-    </g>
-
     <rect class="vignette" {width} {height} fill="url(#tl-vignette)" />
 
     <!-- Era bar: every era along the top, as long as it lasted; click one to
          see all of it. The window marks what's in view. -->
-    <g class="eras">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <g class="eras" class:scrubbing={scrub?.moved} onpointerdown={onBarDown} onpointermove={onBarMove} onpointerup={onBarUp} onpointercancel={onBarUp}>
       <rect class="eras-back" x="0" y="0" {width} height={TOP - 6} />
       {#each eraTabs as { p, a, b, mid, cx, w, lx, moved, y: ly, from, to } (p.id)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -835,7 +825,9 @@
           role="button"
           tabindex="0"
           aria-label="Show {p.name}, {p.when}"
-          onclick={() => pickPeriod(p)}
+          onclick={() => {
+            if (!scrub?.moved) pickPeriod(p)
+          }}
           onkeydown={(e) => {
             if (e.key !== "Enter" && e.key !== " ") return
             e.preventDefault()
@@ -849,6 +841,10 @@
           <rect class="hit" x={cx - w / 2 - 4} y={ly - 11} width={w + 8} height={ERA_ROW} />
           <text class:small={narrow} x={cx} y={ly} text-anchor="middle">{p.name}</text>
         </g>
+      {/each}
+      {#each eraYears as l (l.year)}
+        <line class="era-divide" x1={l.x} x2={l.x} y1={ERA_BAR_Y - 2} y2={ERA_BAR_Y + ERA_SEG_H + 2 + l.row * YEAR_ROW} />
+        <text class="era-year" x={l.cx} y={ERA_BAR_Y + ERA_SEG_H + 10 + l.row * YEAR_ROW} text-anchor="middle">{l.text}</text>
       {/each}
       <rect class="eras-window" x={eraWindow.x} y={ERA_BAR_Y - 3} width={eraWindow.w} height={ERA_SEG_H + 6} rx="3" />
     </g>
@@ -1151,31 +1147,6 @@
     color: var(--gold);
   }
 
-  .strip {
-    cursor: pointer;
-    outline: none;
-  }
-  .strip-hit {
-    fill: transparent;
-  }
-  .strip-era {
-    fill: hsl(var(--hue) 45% 64% / 0.6);
-    stroke: var(--rule);
-  }
-  .strip-bin {
-    fill: var(--events);
-    opacity: 0.55;
-  }
-  .strip-window {
-    fill: var(--gold);
-    fill-opacity: 0.12;
-    stroke: var(--gold);
-    stroke-width: 1.5;
-  }
-  .strip-label {
-    font-size: 11px;
-    fill: var(--ink-3);
-  }
   .vignette {
     pointer-events: none;
   }
@@ -1233,9 +1204,6 @@
   :global([data-theme="dark"]) .era-name {
     fill: hsl(var(--hue) 40% 75% / 0.13);
   }
-  :global([data-theme="dark"]) .strip-era {
-    fill: hsl(var(--hue) 35% 42% / 0.7);
-  }
   :global([data-theme="dark"]) .era-seg {
     fill: hsl(var(--hue) 32% 40%);
     stroke: hsl(var(--hue) 30% 60% / 0.3);
@@ -1250,6 +1218,23 @@
   :global([data-theme="dark"]) .era-tab:hover .era-seg,
   :global([data-theme="dark"]) .era-tab.on .era-seg {
     fill: hsl(var(--hue) 45% 52%);
+  }
+  .eras {
+    cursor: pointer;
+  }
+  .eras.scrubbing {
+    cursor: grabbing;
+  }
+  .era-divide {
+    stroke: var(--ink-3);
+    stroke-opacity: 0.5;
+    pointer-events: none;
+  }
+  .era-year {
+    font-size: 9px;
+    fill: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
   }
   .eras-window {
     fill: none;

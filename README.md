@@ -2,7 +2,7 @@
 
 > **Explore the Story of Scripture**
 
-> **This fork** turns the timeline on its side: time runs top to bottom, the time scale runs down the left, then events, the kingdoms track and people, labels stay upright, and the overview strip becomes a scrollbar down the right edge, with the era names down the left. The wheel scrolls; pinch or Ctrl/⌘-scroll zooms. Everything else follows [upstream](https://github.com/jamers99/biblia-chronos).
+> **This fork** turns the timeline on its side: time runs top to bottom, the time scale runs down the left, then events, the kingdoms track and people, labels stay upright. A coloured era bar along the top is the map of the whole story: click an era to fill the view with it, or drag along the bar to scroll. The wheel scrolls; pinch or Ctrl/⌘-scroll zooms. Everything else follows [upstream](https://github.com/jamers99/biblia-chronos).
 
 **Biblia Chronos** is an open-source site for exploring the Bible through an interactive timeline, a story map, and a page for every person, place, and event, so you can see how the people, places, kingdoms, and events of Scripture fit together.
 

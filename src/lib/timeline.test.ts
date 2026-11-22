@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { packInTimeOrder, packLanes, timelineItems } from "./timeline.ts"
+import { packInTimeOrder, packLanes, staggerLabels, timelineItems } from "./timeline.ts"
 import type { Event, Period, Person } from "./data/schema.ts"
 
 type Box = { id: string; x0: number; x1: number; w: number }
@@ -49,6 +49,20 @@ test("packInTimeOrder keeps the heaviest but lays them out earliest first", () =
   assert.deepEqual(lane(5), { adam: 0, eve: 1, cain: 2, abel: 3, seth: 3 })
   // With room for three, the lightest overlapping item (Abel) is the one left out
   assert.deepEqual(lane(3), { adam: 0, eve: 1, cain: 2 })
+})
+
+test("staggerLabels slides a label a little, then steps it down a row, then drops it", () => {
+  const at = (...xs: number[]) => xs.map((x) => ({ at: x, width: 20 }))
+  // b wants 15 but a ends at 20: it slides to 30 (15 px); c would have to slide 34, so it steps down
+  assert.deepEqual(staggerLabels(at(10, 15, 16), 0, 100, { gap: 0, slack: () => 20 }), [
+    { x: 10, row: 0 },
+    { x: 30, row: 0 },
+    { x: 16, row: 1 },
+  ])
+  // No sliding and one row: the second is dropped
+  assert.deepEqual(staggerLabels(at(10, 15), 0, 100, { gap: 0, slack: () => 0, maxRows: 1 }), [{ x: 10, row: 0 }, undefined])
+  // Kept inside the bounds
+  assert.deepEqual(staggerLabels(at(2), 0, 100), [{ x: 10, row: 0 }])
 })
 
 const period: Period = { id: "p", name: "Era", kind: "period", source: "t", date: { earliest: -100, latest: 0 } }
